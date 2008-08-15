@@ -1,0 +1,5 @@
+; $Id: visualize_backtrace.info,v 1.1.2.1.2.1 2007/12/04 21:42:16 kentbye Exp $
+name = Visualize Backtrace
+description = Parses XDebug function call trace files into flowchart visualizations
+package = Development
+core = 6.x

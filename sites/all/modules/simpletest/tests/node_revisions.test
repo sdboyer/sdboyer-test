@@ -1,0 +1,110 @@
+<?php
+// $Id: node_revisions.test,v 1.4 2008/01/28 08:48:37 rokZlender Exp $
+class NodeRevisionsTest extends DrupalTestCase {
+  /**
+   * Implementation of get_info() for information
+   */
+  function get_info() {
+    return array(
+      'name' => t('Node revisions tests'), 
+      'desc' => t('Creates a node of type page and then a user tries various revision actions such as viewing, reverting to, and deleting revisions.'),
+      'group' => 'Node Tests',
+    );
+  }
+
+  /**
+   * Setup function used by tests. Creates a node with three revisions.
+   *
+   * If $log is TRUE, then a log message will be recorded.
+   */
+  function prepareRevisions($log = FALSE) {
+  
+    $returnarray = array();
+    $numtimes = 3; // First, middle, last.
+    for ($i = 0; $i < $numtimes; $i++) {
+      $settings = array('revision' => 1);
+      if ($log && $i == 1) {
+        $logmessage = $this->randomName(32);
+        $settings['log'] = $logmessage;
+        $returnarray['log'] = $logmessage;
+      }
+      if ($i != 0) {
+        $settings['nid'] = $node->nid;
+      }
+      $node = $this->drupalCreateNode($settings);
+      if ($i == 1) {
+        $returnarray['text'] = $node->body;
+        $returnarray['vid'] = $node->vid;
+      }
+      // Avoid confusion on the revisions overview page which is sorted by r.timestamp.
+      sleep(1);
+    }
+    $returnarray['node'] = $node;
+    return $returnarray;
+  }
+
+  /**
+   * Simpletest test. Tests to make sure the correct revision text appears on "view revisions" page.
+   */
+  function testNodeRevisions() {
+    extract( $this->prepareRevisions() );
+
+    $test_user = $this->drupalCreateUserRolePerm(array('view revisions'));
+    $this->drupalLoginUser($test_user);
+    $this->drupalGet("node/$node->nid/revisions/$vid/view");
+    $this->assertText($text, 'Check to make sure correct revision text appears on "view revisions" page.');
+
+    $this->cleanup($node->nid);
+  }
+
+  /**
+   * Simpletest test. Tests to make sure the correct log message appears on "revisions overview" page.
+   */
+  function testLogMessage() {
+    extract( $this->prepareRevisions(TRUE) );
+
+    $test_user = $this->drupalCreateUserRolePerm(array('view revisions'));
+    $this->drupalLoginUser($test_user);
+    $this->drupalGet("node/$node->nid/revisions");
+    $this->assertText($log, 'Check to make sure log message is properly displayed.');
+
+    $this->cleanup($node->nid);
+  }
+
+  /**
+   * Simpletest test. Tests to make sure the that revisions revert properly.
+   */
+  function testRevisionRevert() {
+    extract( $this->prepareRevisions() );
+
+    $test_user = $this->drupalCreateUserRolePerm(array('revert revisions', 'edit any page content'));
+    $this->drupalLoginUser($test_user);
+    $this->drupalPost("node/$node->nid/revisions/$vid/revert", array(), 'Revert');
+    $newnode = node_load($node->nid);
+    $this->assertTrue(($text == $newnode->body), 'Check to make sure reversions occur properly');
+
+    $this->cleanup($node->nid);
+  }
+
+  /**
+   * Simpletest test. Tests to make sure the revision deletes properly.
+   */
+  function testRevisionDelete() {
+    extract( $this->prepareRevisions() );
+
+    $test_user = $this->drupalCreateUserRolePerm(array('delete revisions', 'delete any page content'));
+    $this->drupalLoginUser($test_user);
+    $this->drupalPost("node/$node->nid/revisions/$vid/delete", array(), 'Delete');
+    $this->assertTrue(db_result(db_query('SELECT COUNT(vid) FROM {node_revisions} WHERE nid = %d and VID = %d', $node->nid, $vid)) == 0, 'Check to make sure revisions delete properly');    $this->cleanup($node->nid);
+
+    $this->cleanup($node->nid);
+  }
+
+  /**
+   * Cleanup function used by tests. Deletes the associated node.
+   */
+  function cleanup($nid) {
+    node_delete($nid);
+  }
+}
+

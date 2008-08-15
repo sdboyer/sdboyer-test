@@ -1,0 +1,35 @@
+<?php
+// $Id: page_creation.test,v 1.19 2008/02/21 08:16:22 rokZlender Exp $
+class PageCreationTest extends  DrupalTestCase {
+  
+  /**
+   * Implementation of get_info() for information
+   */
+  function get_info() {
+    return array(
+      'name' => t('Page node creation'),
+      'desc' => t('Create a page node and verify its consistency in the database.'),
+      'group' => 'Node Tests',
+    );
+  }
+  
+  function testPageCreation() {
+    /* Prepare settings */
+    $this->drupalVariableSet('node_options_page', array('status', 'promote'));
+   
+    /* Prepare a user to do the stuff */
+    $web_user = $this->drupalCreateUserRolePerm(array('edit own page content', 'create page content'));
+    $this->drupalLoginUser($web_user);
+    
+    $edit = array();
+    $edit['title']    = '!SimpleTest test node! ' . $this->randomName(10);
+    $edit['body']     = '!SimpleTest test body! ' . $this->randomName(32) . ' ' . $this->randomName(32);
+    $this->drupalPost('node/add/page', $edit, 'Save');
+    
+    $this->assertWantedRaw(t('!post %title has been created.', array ('!post' => 'Page', '%title' => $edit['title'])), 'Page created');
+    
+    $node = node_load(array('title' => $edit['title']));
+    $this->assertNotNull($node, t('Node !title found in database.', array ('!title' => $edit['title'])));
+    
+  }
+}

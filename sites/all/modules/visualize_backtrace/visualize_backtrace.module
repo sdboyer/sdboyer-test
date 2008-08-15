@@ -1,0 +1,1981 @@
+<?php
+// $Id: visualize_backtrace.module,v 1.1.2.2 2007/10/24 21:02:09 kentbye Exp $
+
+/**
+ * Implementation of hook_menu
+ */
+function visualize_backtrace_menu() {
+  $items = array();
+
+  $items['view_source'] = array(
+    'title' => t('source'),
+    'page callback' => 'visualize_backtrace_view_source_code',
+    'access arguments' => array('administer visualize backtrace'),
+    'type' => MENU_CALLBACK,
+  );
+
+  $items['visualize_backtrace'] = array(
+    'title' => t('Backtrace Graphs of Drupal Function Calls'),
+    'page callback' => 'visualize_backtrace_generate',
+    'access arguments' => array('administer visualize backtrace'),
+    'type' => MENU_CALLBACK,
+  );
+
+  $items['view_traces'] = array(
+    'title' => t('XDebug Traces'),
+    'page callback' => 'visualize_backtrace_display_latest_traces',
+    'access arguments' => array('administer visualize backtrace'),
+    'type' => MENU_CALLBACK,
+  );
+
+  $items['test_xdebug'] = array(
+    'title' => t('Test to See if XDebug is Creating Trace Files'),
+    'page callback' => 'visualize_backtrace_test_xdebug',
+    'access arguments' => array('administer visualize backtrace'),
+    'type' => MENU_CALLBACK,
+  );
+
+  $items['admin/settings/visualize_backtrace'] = array(
+    'title' => 'Visualize Backtrace Settings',
+    'description' => 'Settings to display more function call information.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('visualize_backtrace_admin_settings'),
+    'access arguments' => array('administer site configuration'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+ $items['visualize_backtrace_color_codes'] = array(
+    'title' => t('Color Code Key for the Drupal Function Filenames'),
+    'page callback' => 'visualize_backtrace_color_codes',
+    'access arguments' => array('administer visualize backtrace'),
+    'type' => MENU_CALLBACK,
+  );
+
+  return $items;
+}
+
+/**
+ * Implementation of hook_help().
+ */
+function visualize_backtrace_help($path, $arg) {
+  switch ($path) {
+    case 'admin/settings/visualize_backtrace':
+      return '<p>'. t('First test to see if you have XDebug properly set up and generating trace files by visiting this !test_page. <br />More detailed set-up instructions can be found in the INSTALL.txt file. <br />The "Visualize Backtrace" can then be turned on via the !block page.<br />View the !colorcodepage for Drupal Functions in the Backtraces.', array('!test_page' => l(t('XDebug Test Page'), 'test_xdebug'), '!block' => l(t('block administration'), 'admin/build/block'), '!colorcodepage' => l(t('Color Code Page'), 'visualize_backtrace_color_codes'))) .'</p>';
+    case 'view_traces':
+      return '<p>'. t('The most recent trace files are listed at the top, and are shown in reverse chronological order.  If these files are stored in your /tmp directory, then they may be purged if you reboot your computer. The generated *.dot files stored in the files directory will need to be manually purged from time to time.') .'</p>';
+  }
+}
+
+/**
+ * Implementation of hook_admin_settings().
+ */
+function visualize_backtrace_admin_settings() {
+  $form['visualize_backtrace_execution_threshold'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Highlight Drupal Functions Longer Than'),
+    '#description' => t('Enter an integer in milliseconds. Any Drupal function which takes longer than this many milliseconds will be highlighted red in the callstack table.  This is also the threshold for marking the total time of the capture function and all of its children functions.'),
+    '#default_value' => variable_get('visualize_backtrace_execution_threshold', 5),
+    '#size' => 4,
+    '#maxlength' => 4,
+  );
+
+  $form['visualize_backtrace_contrib_module_filepath'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Capture Contributed Module Functions at this Location'),
+    '#default_value' => variable_get('visualize_backtrace_contrib_module_filepath', 'sites/'),
+    '#description' => t('Enter the directory that contains the module functions that you want to capture through the shortcut link "Graph the Contributed Module Function Backtraces". The default directory will capture all contributed module functions, but it is possible to enter a specific module or theme directory here as well (i.e. "themes/garland" or "sites/all/modules/views").'),
+    '#size' => 40,
+  );  
+
+  $form['visualize_backtrace_create_main_subsections'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Split the Main Section into Three Subsections'),
+    '#default_value' => variable_get('visualize_backtrace_create_main_subsections', 1),
+    '#description' => t("Sometimes the Main Section is too big to be plotted all at once, and this option splits up the main section into three equal sections, which makes it quicker and easier to plot in smaller segments.  Turning this off will not create these three main subsection *.dot files whenever a new trace file is parsed")  
+  );
+
+  $form['visualize_backtrace_source_code_link_location'] = array(
+    '#type' => 'select',
+    '#title' => t('Display Source Code Located at'),
+    '#default_value' => variable_get('visualize_backtrace_source_code_link_location', 'local'),
+    '#options' => array(
+      'local' => t('Local copy'),
+      'drupal60_cvs' => t('Drupal 6.0 CVS'),
+    ),
+    '#description' => t('Chose whether to dynamically link to locally-stored copies of source code on your computer or to the static versions from cvs.drupal.org'),
+  );
+
+  $form['visualize_backtrace_source_code_font_size'] = array(
+    '#type' => 'textfield',
+    '#title' => t('View Source Code Font Size'),
+    '#description' => t('The default font size for displaying the source code is 12px.'),
+    '#default_value' => variable_get('visualize_backtrace_source_code_font_size', 12),
+    '#size' => 4,
+    '#maxlength' => 4,
+  );
+  
+  $form['visualize_backtrace_zgrviewer_location'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Path Containing ZGRViewer'),
+    '#default_value' => variable_get('visualize_backtrace_zgrviewer_location', '/usr/local/bin/zgrviewer'),
+    '#description' => t('This is the unix path where the ZGRViewer is installed.  The ZGRViewer is a java program that can be run from the command line to plot the *.dot flowchart visualizations. The INSTALL.txt contains more instructions for setting it up.'),
+    '#size' => 40,
+  );  
+  
+  $form['visualize_backtrace_hide_repeating_functions'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Hide Repeating Functions'),
+    '#default_value' => variable_get('visualize_backtrace_hide_repeating_functions', 1),
+    '#description' => t("Detect and consolidate repeating looping pairs of 1, 2 or 3 functions in order to make the flowcharts easier to read and quicker to load.")  
+  );
+
+  $form['visualize_backtrace_debug_duplication'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Display debugging information for the repeating function detection algorithm'),
+    '#default_value' => variable_get('visualize_backtrace_debug_duplication', 0),
+    '#description' => t("Display some additional information in the Full Function Callstack table to help debug the visualize_backtrace_detect_repeating_functions() code. Only relevent when the Repeating Functions are being hidden.")  
+  );
+  
+  
+  return system_settings_form($form);
+}
+
+
+/**
+ * Implementation of hook_block().
+ * 
+ */
+function visualize_backtrace_block($op = 'list', $delta = 0) {
+  if ($op == 'list') {
+    $blocks[0]['info'] = t('View Backtrace Graphs');
+    return $blocks;
+  }
+  else if ($op == 'view') {
+    switch ($delta) {
+      case 0:
+        if (user_access('administer visualize backtrace')) {
+          $block['subject'] = t('Visualize Backtrace');
+            // Get the trace log number by striping out number from /tmp/trace.####.xt file.
+            $current_trace_number = explode('.', xdebug_get_tracefile_name());
+            $current_trace_number = $current_trace_number[1];
+          $links[] = l('Generate Backtrace Data for this Page Load', 'visualize_backtrace/'. $current_trace_number .'/hide_callstack/all_sections');
+          $links[] .= l('View All Past Trace Files', 'view_traces');
+          $links[] .= l('Color Code Key', 'visualize_backtrace_color_codes');
+          $links[] .= l('Admin Settings', 'admin/settings/visualize_backtrace');
+        }
+        if ($links) {
+          $block['content'] = theme('item_list', $links);
+        }
+        break;
+    }
+    return $block;
+  }
+}
+
+/**
+ * Implementation of hook_perm
+ */
+function visualize_backtrace_perm() {
+  return array('administer visualize backtrace');
+}
+
+/**
+ * Displays the Drupal source code stored on your localhost in the browswer so
+ * that you can toggle between the function call graph and the specific source
+ * code line number.  It provides permalink anchors to each line of your Drupal
+ * source code along with proper PHP syntax highlighting
+ */
+function visualize_backtrace_view_source_code() {
+  // For security considerations, prevent the settings.php file being displayed
+  // There should be a better way to do this -- as I think it's throwing a lot of error handlers
+  //return "test";
+  if (arg(3) != "settings.php") $handle = @fopen(arg(1) ."/". arg(2) ."/". arg(3) ."/". arg(4) ."/". arg(5) 
+                                          ."/". arg(6) ."/". arg(7) ."/". arg(8) ."/". arg(9) ."/". arg(10) ."/", "r");
+  if ($handle) {
+    $i = 1;
+
+    $total_buffer = "";
+
+    while (!feof($handle)) {
+      $buffer = fgets($handle, 4096);
+      // Add in extra spaces before the colon so that the code will be aligned
+      // independent of extra spaces due to counter digit increases (i.e. 9 to 10)
+      $right_align = "";
+      if ($i < 1000) $right_align = " ";
+      if ($i < 100) $right_align = "  ";
+      if ($i < 10) $right_align = "   ";
+      $total_buffer .= "XXX_BEGIN_XXX". $i ."XXX_END_XXX". $i . $right_align .": ". $buffer;
+      $i++;
+    }
+    
+    // Add a few more line breaks to separate the devel query info
+    $total_buffer .= "XXX_REPLACE_WITH_LINE_BREAKS_XXX";
+    
+    // Do the PHP Syntax highlighting
+    $total_buffer = highlight_string($total_buffer, 1);
+
+    // Get rid of extra line breaks -- via codefilter.module @codefilter_process_php()
+    $total_buffer = str_replace("\n", '', $total_buffer);
+
+    // fix spaces -- via codefilter.module @codefilter_fix_spaces()
+    $total_buffer = preg_replace('@&nbsp;(?!&nbsp;)@', ' ', $total_buffer);
+    
+    // Replace the placeholder XXX_BEGIN_XXX and XXX_END_XXX with anchor info (e.g. <a name ="45"></a> for line #45)
+    $total_buffer = str_replace("XXX_BEGIN_XXX", '<a name="', $total_buffer);
+    $total_buffer = str_replace("XXX_END_XXX", '"></a>', $total_buffer);
+    $total_buffer = str_replace("XXX_REPLACE_WITH_LINE_BREAKS_XXX", '<br /><br />', $total_buffer);
+    $total_buffer = '<div style="font-size: '. variable_get('visualize_backtrace_source_code_font_size', 12) .'px">'. $total_buffer .'</div>';
+
+    echo $total_buffer;
+    fclose($handle);
+  }
+}
+
+/**
+ * This is the main function that parses the trace file data into graphable
+ * flowcharts. The full function call backtrace is split into three sections:
+ * Bootstrap, Main, and Theme -- along with three optional subsections for the
+ * Main section if it is too large to graph at once. It is also possible to view
+ * the backtrace table and flowchart for a specific function
+ *
+ * Here are the URL Arguments:
+ * arg(0) = 'visualize_backtrace' initializes this fuction via menu_callback
+ * arg(1) = XDebug trace number to be parsed
+ * arg(2) = Flag to display a text table of all of the fuction calls that 
+ *          includes links to graph the backtraces of specific function calls
+ * arg(3) = $subsection_argument: Automatically graphs the flowchart of a
+ *          specified section and displays just that portion of the callstack
+ *          table. (i.e. "section_2")
+ *          It also could be a flag to display either the
+ *          backtrace or forwardtrace for a specific function
+ *          (i.e. "show_function_backtrace" or "show_function_forwardtrace")
+ *          It can also be a flag to display all of the functions referenced
+ *          from a specific module filename
+ *          (i.e "show_filename_backtrace" or "show_filename_forwardtrace")
+ * arg(4) = Show either the backtrace or forwardtrace of this specified function
+ *          or specified filename.
+ *          It could also be a flag to to display all of the functions that
+ *          appear in filenames in the contributed module sites-all directory
+ *          (i.e. "capture_all_contrib_functions")
+ *
+ * Quickly create the graphviz *.dot files with this splash page default view:
+ * /visualize_backtrace/1191366294/hide_callstack/all_sections/
+ *
+ * Create the *.dot files and display all of the function calls in table form:
+ * /visualize_backtrace/1191366294/view_callstack/all_sections/
+ *
+ * Create the *.dot files, display a subsection of the function calls in table
+ * form and automatically plot the backtrace flowchart for this section:
+ * /visualize_backtrace/1191366294/view_callstack/section_1
+ * 
+ * Create the *.dot files, display the backtraces for a specific function call,
+ * and automatically plots them
+ * /visualize_backtrace/1191366294/view_callstack/show_function_backtrace/db_query/
+ *
+ * Create the *.dot files, display the backtraces & the forwardtraces for a
+ * specific function call, and automatically plots them.
+ * /visualize_backtrace/1191366294/view_callstack/show_function_forwardtrace/db_query/
+ *
+ * Create the *.dot files, display the backtrace for all of the functions from
+ * a specific module filename and automatically plots them.
+ * visualize_backtrace/1191366294/view_callstack/show_filename_backtrace/includes-menu.inc
+ * 
+ * Create the *.dot files, display all the backtraces for all of the functions
+ * that are called from a contributed module filename & automatically plots them
+ * visualize_backtrace/1191366294/view_callstack/show_filename_backtrace/capture_all_contrib_functions
+ *  
+ * NOTE: XDebug must be installed & properly configured for this to work.
+ * See the INSTALL.txt or http://xdebug.org for more information
+ */
+function visualize_backtrace_generate() {
+  menu_rebuild();
+  global $base_url;
+  
+  // The argument that is passed in is the trace number
+  $trace_number = arg(1);
+
+  // Determine the XDebug trace file path by parsing the result of the
+  // xdebug_get_tracefile_name() function
+  $trace_file = visualize_backtrace_get_xdebug_tracefile_path();
+  
+  // Add the trace number to duplicate the full path (e.g. $trace_file = "/tmp/trace.1189698885.xt") 
+  $trace_file .= "trace.". $trace_number .".xt";
+    
+  // After determining the XDebug tracefile from the arguments, then parse out the relevent columns with an
+  // awk shell command. The following awk variables read in the tab-separated data created by XDebug w/ the
+  // following values: $1 = level, $2 = function_number, $3 = always_zero, $4 = time_index, $5 = memory,
+  // $6 = function_name, $7 = defined_function, $8 = via_filename,
+  // if ($10 exists) then {$9 = included_file; $10 = line_number} else {$9 = line_number}
+  // See this page to verify all of the information that XDebug should be outputting:
+  // http://xdebug.org/docs/all_settings#trace_format
+  // We're interested in the Drupal function data (i.e. $3 = 0 & $7 = 1), but the awk command
+  // also appends the previous PHP function data if the Drupal function's line number = 0.
+  // This command creates a new trace file w/ "parsed" appended to the name (i.e. "/tmp/trace.1189698885.xtparsed")
+  // Here is the full command $ cat -v /tmp/trace.1191544445.xt | awk {'if($3==0 && $7==0) {level = $1; function_number = $2; function_name = $6; line_number = $9; via_filename = $8; time_index = previous_time_index; memory = previous_memory} if($3 == 0 && $7 == 1 && $10) {if($10==0) {print $1 "\t" $2 "\t" $6 "\t" $9 "\t" $10 "\t" previous_time_index "\t" previous_memory "\t" function_name "\t" level "\t" function_number "\t" via_filename "\t" line_number "\t" time_index "\t" memory} else {print $1 "\t" $2 "\t" $6 "\t" $9 "\t" $10 "\t" previous_time_index "\t" previous_memory}} if($3 == 0 && $7 == 1 && !$10) {if($9==0) {print $1 "\t" $2 "\t" $6 "\t" $8 "\t" $9 "\t" previous_time_index "\t" previous_memory "\t" function_name "\t" level "\t" function_number "\t" via_filename "\t" line_number "\t" time_index "\t" memory} else {print $1 "\t" $2 "\t" $6 "\t" $8 "\t" $9 "\t" previous_time_index "\t" previous_memory}} if($5) {previous_time_index = $4; previous_memory = $5;} if($1 > 0 && $2 > 0 && !$4) {print $1 "\t" $2}'} > /tmp/trace.1191544445.xtparsed
+  $parse_trace_command = 'cat -v '. $trace_file .' | ';
+  $parse_trace_command .= 'awk {\'';
+                            // Save the data for each non-Drupal PHP function to be able to reference it if a procedural hook is called
+                            // The time index and memory values are after the function has run,
+                            // and so shift them to the next row where they will represent the beginning
+                            // & so that the time & memory delta will be ($function_count+1)-$function_count 
+  $parse_trace_command .=   'if($3==0 && $7==0) {';
+  $parse_trace_command .=     'level = $1; function_number = $2; function_name = $6; line_number = $9; via_filename = $8; time_index = previous_time_index; memory = previous_memory';
+  $parse_trace_command .=   '} ';
+                            // Check to see if this is a Drupal function (i.e. $3 = 0 & $7 = 1)
+                            // If there is a value for column $10, then that means that an include file is being added,
+                            // which means that $9 = via_filename & $10 = line_number
+  $parse_trace_command .=   'if($3 == 0 && $7 == 1 && $10) {';
+                               // If the line number is 0, then add in the previous PHP function data
+  $parse_trace_command .=      'if($10==0) {';
+  $parse_trace_command .=        'print $1 "\t" $2 "\t" $6 "\t" $9 "\t" $10 "\t" previous_time_index "\t" previous_memory "\t" function_name "\t" level "\t" function_number "\t" via_filename "\t" line_number "\t" time_index "\t" memory';
+  $parse_trace_command .=      '} ';
+  $parse_trace_command .=      'else {';
+  $parse_trace_command .=        'print $1 "\t" $2 "\t" $6 "\t" $9 "\t" $10 "\t" previous_time_index "\t" previous_memory';
+  $parse_trace_command .=      '}';
+  $parse_trace_command .=   '} ';
+                            // Most of the Drupal function won't have a column $10, which means that $8 = via_filename & $9 = line_number
+  $parse_trace_command .=   'if($3 == 0 && $7 == 1 && !$10) {';
+                              // If the line number is 0, then add in the previous PHP function data
+  $parse_trace_command .=     'if($9==0) {';
+  $parse_trace_command .=       'print $1 "\t" $2 "\t" $6 "\t" $8 "\t" $9 "\t" previous_time_index "\t" previous_memory "\t" function_name "\t" level "\t" function_number "\t" via_filename "\t" line_number "\t" time_index "\t" memory';
+  $parse_trace_command .=     '} ';
+  $parse_trace_command .=     'else {';
+  $parse_trace_command .=       'print $1 "\t" $2 "\t" $6 "\t" $8 "\t" $9 "\t" previous_time_index "\t" previous_memory';
+  $parse_trace_command .=     '}';
+  $parse_trace_command .=   '} ';
+                            // Store this row's end time and end memory
+                            // It will be used as the next row's beginning time and beginning memory
+  $parse_trace_command .=   'if($5) {';
+  $parse_trace_command .=     'previous_time_index = $4; previous_memory = $5;';
+  $parse_trace_command .=   '} ';
+                            // This will print out the final Time and Memory values on the 2nd to last line
+                            // It will also inadvertantly output the XDebug version info from the first line,
+                            // but it will be filtered out when it's read back in
+  $parse_trace_command .=   'if($1 > 0 && $2 > 0 && !$4) {';
+  $parse_trace_command .=     'print $1 "\t" $2';
+  $parse_trace_command .=   '}';
+  
+  $parse_trace_command .= '\'} > '. $trace_file .'parsed';
+  shell_exec($parse_trace_command);
+
+  // Flowchart nodes can be hypertext linked to the specific source code line where the function calls was executed
+  // If the link location variable is set to local, then it will use the visualize_backtrace_view_source_code() callback for viewing local copies of code
+  // The "local" option is primarily for viewing local copies of code for that is being written for custom modules or core development
+  // before a CVS commit has been made.
+  // The "Drupal52_CVS" option is for creating hyperlinked SVG files that have accessible permalinks to the CVS.drupal.org source code lines
+  // Primarily for documentation purposes, and the specific version numbers for Drupal 5.2 are included in the $lookup_table()
+  $source_code_link_location = variable_get('visualize_backtrace_source_code_link_location', 'local');
+  $lookup_table = visualize_backtrace_get_lookup_table_values($source_code_link_location);
+
+  // intitialize variables
+  $row = 0;
+  $function_call_data = array();
+  $function_call_data[1]['time_index'] = 0;
+  $function_call_data[1]['memory'] = 0;
+
+  // Extraneous filename path data will be stripped out (i.e. "/Library/WebServer/Documents/d52/") by subtracting out the length of UNIX base_path
+  // TODO: Possibly replace some of these things with The Drupal core functions...
+  $unix_base_path = shell_exec("pwd");
+
+  // Open up the parsed trace file
+  $handle = fopen($trace_file ."parsed", "r");
+  while (($data = fgetcsv($handle, 1000, "\t")) !== FALSE) {
+    // If there is a fifth column then that means that the Line = 0 for this function because it was called by
+    // a previously-called PHP function -- usually either preg_replace_callback or call_user_func_array
+    $data_length = count($data);
+    // If a row has 14 columns, then it has line = 8 and need to save the PHP function first.
+    // The first row of data also has 14 columns, but the last 9 columns are blank
+    if ($row > 0 && $data_length > 8) {
+      // Add the PHP function data to the function call list only if it is a previous level than the Drupal Function
+      // Also don't add the previous PHP function if the function is an error_handler
+      if ($data[8] < $data[0] && $data[2] != "error_handler") {  
+        // First add in an additional row for the PHP function so that the levels will be plotted out correctly
+        $row++;
+        $function_call_data[$row]['PHP_function'] = TRUE;
+        $function_call_data[$row]['level'] = $data[8];
+        $function_call_data[$row]['function_number'] = $data[9];
+        // This is the PHP function name
+        $function_call_data[$row]['function_name'] = $data[7];
+        // Strip out the base path info from the via_filename in order to normalize the file path for the lookup arrays
+        $function_call_data[$row]['via_filename'] = substr($data[10], (strlen($data[10])-strlen($unix_base_path))*-1);
+        $function_call_data[$row]['line_number'] = $data[11];
+        $function_call_data[$row]['time_index'] = $data[12];
+        $function_call_data[$row]['memory'] = $data[13];
+        $function_call_data[$row]['via_PHP_function'] = "";
+      }
+
+      // Then add in the Drupal function
+      $row++;
+      $function_call_data[$row]['PHP_function'] = FALSE;
+      $function_call_data[$row]['level'] = $data[0];
+      $function_call_data[$row]['function_number'] = $data[1];
+      $function_call_data[$row]['function_name'] = $data[2];
+      $function_call_data[$row]['via_filename'] = substr($data[3], (strlen($data[3])-strlen($unix_base_path))*-1);
+      $function_call_data[$row]['line_number'] = $data[4];
+      $function_call_data[$row]['time_index'] = $data[5];
+      $function_call_data[$row]['memory'] = $data[6];
+      // Add data that will later be used as a label to indicate that this function was called from a PHP function
+      $function_call_data[$row]['via_PHP_function']='\n* via: ';
+      
+    }
+    else {
+      // Add in the metadata for the Drupal functions called by other Drupal functions
+      // Filter out eval function names since the drupal_eval code yields irregular trace file data
+      // The final time and memory values only have two columns, and so make sure the fourth column has a number
+      // Also filter out the the erroneous "Version:" info on the first line of the parsed file
+      //if ($data[2] != "eval" && $data[0] != "Version:" && is_numeric($data[4])) {
+      if ($data_length > 2) {
+        if ($data[2] != "eval") {
+          $row++;
+          $function_call_data[$row]['PHP_function'] = FALSE;
+          $function_call_data[$row]['level'] = $data[0];
+          $function_call_data[$row]['function_number'] = $data[1];
+          $function_call_data[$row]['function_name'] = $data[2];
+          $function_call_data[$row]['via_filename'] = substr($data[3], (strlen($data[3])-strlen($unix_base_path))*-1);
+          $function_call_data[$row]['line_number'] = $data[4];
+          $function_call_data[$row]['time_index'] = $data[5];
+          $function_call_data[$row]['memory'] = $data[6];
+          $function_call_data[$row]['via_PHP_function']="";
+        }
+      }
+      elseif ($data[0] != "Version:") {
+        $final_time = $data[0];
+        $final_memory = $data[1];
+      }
+    }
+  }
+
+  // Save the total number of $rows to loop through after the duplicate functions have been removed.
+  $total_rows = $row;
+  
+  // Close the parsed trace file.
+  fclose($handle);
+
+  // Detect whenever 1, 2 or 3 functions iteratively repeat
+  // The function all data is returned with a 'function_repeat' flag set to 1 if
+  // the function is part of a single, double or triple iterating loop
+  // Added an admin option to determine whether repeating functions should be filtered out
+  if (variable_get('visualize_backtrace_hide_repeating_functions', 1)) {
+    visualize_backtrace_detect_repeating_functions(&$function_call_data);
+  }
+  
+  // Initialize Variables
+  // Check arg(3) to see if the backtrace for a specific function should be graphed and output into a table
+  $subsection_argument = arg(3);
+  if ($subsection_argument == "show_function_backtrace" || $subsection_argument == "show_function_forwardtrace") {
+    $capture_function = arg(4);
+    $capture_function_backtrace_flag = TRUE;
+    $subgraph_cluster_count = 0;
+    $capture_function_count = 0;
+    if ($subsection_argument == "show_function_forwardtrace") {
+      $capture_function_forwardtrace_flag = TRUE;
+    }
+    $capture_contrib_functions = FALSE;
+    // Make sure that functions with null filenames don't get marked as a capture function
+    $capture_filename = "xxx";
+  }
+  // Use the same capture_function codebase to capture all instances of a specific module filename
+  elseif ($subsection_argument == "show_filename_backtrace" || $subsection_argument == "show_filename_forwardtrace") {
+    // Restore the '/' filepath argument delimiters by replacing any inserted '-' delimiters
+    $capture_filename = preg_replace('/-/', '/', arg(4));
+    // Check to see if a special flag has been set in arg(4) to capture all contributed functions
+    $capture_contrib_functions = FALSE;
+    if ($capture_filename == 'capture_all_contrib_functions') {
+      // This variable can be defined in the admin section
+      $contrib_module_filepath = variable_get('visualize_backtrace_contrib_module_filepath', 'sites/');
+      $capture_contrib_functions = TRUE;
+    }
+    $capture_function_backtrace_flag = TRUE;
+    $subgraph_cluster_count = 0;
+    $capture_function_count = 0;
+    if ($subsection_argument == "show_filename_forwardtrace") {
+      $capture_function_forwardtrace_flag = TRUE;
+    }
+  }
+  else {
+    $capture_function_backtrace_flag = FALSE;
+    $capture_contrib_functions = FALSE;
+  }
+  
+  $function_call_stack = array();
+  // Create a 0-level index value for the function call stack to connect level=1 functions at the end
+  $function_call_stack[0] = "index.php";
+
+  // Keep track of whether or not the theme() function was executed from index.php
+  $index_theme_executed = FALSE;
+
+  // Intialize the *.dot output arrays
+  $output_to_dot_all = array();
+  $output_to_dot_function = array();
+
+  $row=1;
+  $function_count = 0;
+  
+  // Loop through the results to store the time and memory values in an array with a $key of the $function_count
+  // This makes it possible to calculate the deltas with ($function_count + 1) without knowing
+  // which future $row number is the next non-repeating function
+  // (i.e. $time_delta = $time_index_array[($function_count+1)] - $time_index_array[$function_count] )
+  while ($row <= $total_rows) {
+    if (!$function_call_data[$row]['function_repeat']) {
+      $function_count++;
+      $time_index_array[$function_count] = $function_call_data[$row]['time_index'];
+      $memory_array[$function_count] = $function_call_data[$row]['memory'];
+    }
+    $row++;
+  }
+  // Add the final time and memory values at the end of the array in order to properly calculate the last function's values
+  $time_index_array[($function_count+1)] = $final_time;
+  $memory_array[($function_count+1)] = $final_memory;
+
+  // Re-Initialize the $row & $function_count
+  $row=1;
+  $function_count = 0;
+  $capture_function_depth = 1;
+  $drupal_version = floor(VERSION);
+  $time_threshold = variable_get('visualize_backtrace_execution_threshold', 5);
+  
+  /**
+    * Generate the *.dot syntax for each function call by looping through all of
+    * the nodes & skipping over the repeating functions
+    * Optionally capture the backtrace or forwardtrace data for specific functions
+    */
+  while ($row <= $total_rows) {
+    // Verify that this row has not been flagged as a repeating function
+    if (!$function_call_data[$row]['function_repeat']) {
+      $level = $function_call_data[$row]['level'];
+      $function_number = $function_call_data[$row]['function_number'];
+      $function_name = $function_call_data[$row]['function_name'];
+      $via_filename = $function_call_data[$row]['via_filename'];
+      $line_number = $function_call_data[$row]['line_number'];
+      $via_PHP_function = $function_call_data[$row]['via_PHP_function'];
+      $repeating_function_label = $function_call_data[$row]['repeating_function_label'];
+
+      // This function count counts the number of non-repeating functions so that it can be shown on the flowchart as
+      // "f" plus the function count number.
+      // The function count also serves as the array index for the output data to be written to the *.dot file.
+      $function_count++;
+      $function_call_data[$row]['function_count'] = $function_count;
+      
+      // If this was a procedural Drupal hook function, then use the previous level's function_id to determine
+      // the correct via_filename & line_number -- as well as correct referential function_name for the via_PHP_function label 
+      if ($via_PHP_function) {
+        // The function id is delimited by a double underscore so explode it to determine the correct PHP reference info
+        $previous_level_function_id = $output = explode('__', $function_call_stack[$level-1]);
+        $via_filename = $previous_level_function_id[1];
+        $line_number = $previous_level_function_id[2];
+        // Tack on the correct previous function to the via_PHP_function label
+        $via_PHP_function .= $previous_level_function_id[0];
+      }
+
+      // The function_id uniquely identifies this function by combining the Function name + filename reference +
+      // line number + function call count.  The function call count prevents commonly run functions from making
+      // the output both clustered and more complicated to follow
+      // Functions with a line number of 0 use the line number of the previous PHP function to make it easier
+      // to link to the source code location where procedural hooks are called
+      $function_id = $function_name ."__". $via_filename ."__". $line_number ."__". $function_count;
+      
+      // This array keeps track of the call stack tree for any given function call.
+      // It is used for creating the nodal connections
+      $function_call_stack[$level] = $function_id;
+     
+      // The node color & the source code Links Permalinks for each filename
+      // If the CVS permalink w/ version number isn't defined, then either manually add it to the
+      // $lookup_table array in visualize_backtrace_get_lookup_table_values() section of code.
+      // Otherwise, it will default to the local copy, but the lines won't be accessible for
+      // documentation purposes (i.e. in creating a hypertext linked SVG)
+      if ($source_code_link_location == "local") {
+        $lookup_table[$via_filename]["source_code_line_url"] = $base_url ."/view_source/". $via_filename ."#";
+      }
+      else {
+        if ($lookup_table[$via_filename]["source_code_line_url"] == "") {
+          $lookup_table[$via_filename]["source_code_line_url"] = $base_url ."/view_source/". $via_filename ."#";
+        }
+      }
+
+      // The node connection colors are sequentially alternated in order to help match the correct
+      // label to each line, which helps in cluttered graphs.
+      // Get the last digit of the function_count to determine the color for the node connection
+      $node_connection_color = $lookup_table["node_connection_color"][$function_count % 10];
+
+      // Create the node connection data for each row.
+      // The *.dot syntax will end up looking like the following:
+      // "{main}_1_1" -> "require_once__index.php_12_2" [label="f2" href="http://api.drupal.org/api/function/require_once/5" color="#FF0000" fontcolor="#FF0000"];
+      $node_connection_data = '"'. $function_call_stack[$level-1] .'" -> "'. $function_id .'" [label="f'. $function_count .'" href="http://api.drupal.org/api/function/'. 
+                              $function_name .'/'. $drupal_version .'" color="'. $node_connection_color .'" fontcolor="'. $node_connection_color .'"]; ';
+
+      $time_delta[$function_count] = round(($time_index_array[($function_count+1)] - $time_index_array[$function_count])*1000, 3);
+      $memory_delta[$function_count] = round(($memory_array[($function_count+1)] - $memory_array[$function_count])/1000, 3);
+            
+      // Create the node label with the function name, filename, line number & function number,
+      // as well as the node color and a hypertext link to the specific line number code.
+      // Procedural Drupal Hooks are labeled with a $via_PHP_function label
+      // Looping sets of 1, 2 or 3 functions are also labeled with how many times they repeat.
+      // The label will end up looking something like:
+      // "require_once__index.php_12_2" [label="require_once\nindex.php\nline: 12\nf2" color="#C7E9B4" href="http://cvs.drupal.org/viewvc.py/drupal/drupal/index.php?annotate=1.91#l12"];
+      $node_label = '"'. $function_id .'" [label="'. $function_name .'\n'. $via_filename . $via_PHP_function . $repeating_function_label .'\nline: '. $line_number .'\nf'. $function_count .' -- '. $time_delta[$function_count] .'ms" "'. $level .' "color="'. 
+                    $lookup_table[$via_filename]["node_color_hex"] .'" href="'. $lookup_table[$via_filename]["source_code_line_url"] . $line_number .'"];';
+      $output_to_dot_all[$function_count] = $node_connection_data . $node_label;
+      
+      /**
+        * If a capture function is passed in via arg(4), then capture the backtrace & forwardtrace data
+        * (i.e. backtrace = parent functions & forwardtrace = children functions)
+        */
+      if ($capture_function_backtrace_flag) {
+        if ($capture_contrib_functions) {
+          // Check to see if this function is called from a contributed module filename
+          // (i.e. if via_filename begins with 'sites/' -- or whatever the $contrib_module_filepath is)
+          if (substr($via_filename, 0, strlen($contrib_module_filepath)) == $contrib_module_filepath) {
+            $capture_contrib_functions_flag = TRUE;
+          }
+        }
+        // Initialize the variable that will flag the capture functions
+        $capture_function_flag[$function_count] = FALSE;
+        
+        // Each time the $capture_function is called, then capture the parent backtrace functions
+        if ($function_name == $capture_function || $via_filename == $capture_filename || $capture_contrib_functions_flag) {
+          $function_level_loop = $level;
+          
+          // Loop backwards down through the previous function call stack levels
+          // to extract the function count numbers of all of the functions in the backtrace
+          while ($function_level_loop > 0) {
+            // explode the function_id to get the function count
+            $previous_function_count = explode('__', $function_call_stack[$function_level_loop]);
+            // Save the *.dot syntax code for that particular function count
+            // If it is the captured function, then highlight it with a pink box (i.e. a GraphViz subgraph cluster)
+            // if $capture_function_flag is already TRUE, then the captured function is a child of itself &
+            // appears in its own backtrace so don't overwrite the label & inserted box
+            if (!$capture_function_flag[$previous_function_count[3]]) {
+              // Flag the captured function so that it can be marked with a box later on
+              // The captured function happens when the function_level_loop = the current $level
+              // Also keep track of the total number of times that the function occurs
+              if ($function_level_loop == $level) {
+                
+                $subgraph_cluster_count++;
+                $output_to_dot_function[$previous_function_count[3]] = $output_to_dot_all[$previous_function_count[3]];
+                
+                // Keep track of the captured function's function count to highlight in the callstack table
+                $capture_function_flag[$previous_function_count[3]] = TRUE;
+
+                // Keep track of the total number of times this function has been called
+                // including any number of repeats calculated in the visualize_backtrace_detect_repeating_functions() function
+                if ($function_call_data[$row]['repeating_function_count']) {
+                  $capture_function_count = $capture_function_count + $function_call_data[$row]['repeating_function_count'];
+                }
+                // This instance of the capture function is not in a repeating loop
+                else {
+                  $capture_function_count++;
+                }
+                                
+                // Check to see if this is a nested instance of the captured function by first
+                // checking to see if the $capture_function_children_flag is still set to TRUE
+                if ($capture_function_children_flag) {
+                  // If the current level is greater than the level stored in the captured function level array,
+                  // then add another level to the depth index.
+                  if ($level > $capture_function_level_array[$capture_function_depth]) {
+                    $capture_function_depth++;
+                    // Add this nested child captured function to the parent capture function's count & time sum
+                    // Start at one less the current depth and go down to the bottom level (i.e. top parent)
+                    $capture_function_depth_key = $capture_function_depth - 1;
+                    while ($capture_function_depth_key >= 1) {
+                      $subgraph_cluster_count_index = $capture_function_cluster_number[$capture_function_depth_key];
+                      $capture_function_children_time_sum[$subgraph_cluster_count_index] = $capture_function_children_time_sum[$subgraph_cluster_count_index] + $time_delta[$function_count];
+                      $capture_function_children_count[$subgraph_cluster_count_index]++;
+                      $capture_function_depth_key--;
+                    }
+                  }
+                  // If the depth is greater than one, then first check to see if the depth needs to be reduced,
+                  // and then determine whether or not to add in this function's time to the previous depths (i.e. parent functions)
+                  elseif ($capture_function_depth > 1) {
+                    // Check to see if the depth needs to be iteratively reduced
+                    // (i.e. whenever a nested function's forwardtrace tree ends)
+                    $reduce_depth_flag = TRUE;
+                    while ($reduce_depth_flag) {
+                      // Check to see if the current level is less than or equal to the stored level at the previous depth --
+                      // while making sure not to decrement the depth down to 0
+                      if ($level <= $capture_function_level_array[$capture_function_depth-1] && $capture_function_depth >= 1) {
+                        // This marks the end of a previous nested capture function forward trace,
+                        // and so reduce the capture function depth & zero out the stored level array at that depth
+                        $capture_function_level_array[$capture_function_depth] = 0;
+                        $capture_function_depth--;
+                      }
+                      else {
+                        // Stop reducing the depth since this function's $level is now equal to or
+                        // greater than $capture_function_level_array[$capture_function_depth]
+                        $reduce_depth_flag = FALSE;
+                      }
+                    }
+                    // Add this function's time data & count to its parent captured function(s) by looping through the previous depths
+                    $capture_function_depth_key = $capture_function_depth - 1;
+                    while ($capture_function_depth_key >= 1) {
+                      $subgraph_cluster_count_index = $capture_function_cluster_number[$capture_function_depth_key];
+                      $capture_function_children_time_sum[$subgraph_cluster_count_index] = $capture_function_children_time_sum[$subgraph_cluster_count_index] + $time_delta[$function_count];
+                      $capture_function_children_count[$subgraph_cluster_count_index]++;
+                      $capture_function_depth_key--;
+                    }
+                  }
+                }
+                
+                // Set the flag to start capturing data on the children functions of this capture function
+                $capture_function_children_flag = TRUE;
+
+                // Save both the level & count of this captured function in case there are any captured function children
+                $capture_function_level_array[$capture_function_depth] = $level;
+                $capture_function_cluster_number[$capture_function_depth] = $subgraph_cluster_count;
+                
+                // Determine the number of and elapsed time of all of the functions that come after the captured function -- if any
+                $capture_function_children_time_sum[$subgraph_cluster_count] = 0;
+                $capture_function_children_count[$subgraph_cluster_count] = 0;
+                
+                // Keep track of where this captured function's function count for inserting the children time sum and count later on
+                $capture_function_index[$subgraph_cluster_count] = $function_count;
+
+              }
+              // Save the backtrace nodal connections for this instance of the captured function as it loops backwards through the backtrace levels
+              else {
+                $output_to_dot_function[$previous_function_count[3]] = $output_to_dot_all[$previous_function_count[3]];
+              }
+            }
+            $function_level_loop--;
+          }
+        }
+
+        /**
+          * Now gather the forwardtrace data for the captured function
+          * Capture the total count and length of time it takes of the children functions of the captured function
+          * Stop capturing children function data when the current row's $level is equal to or less than the $capture_function_level
+          * Graph the children functions to the $output_to_dot_function array if arg(3) = 'show_function_forwardtrace' --
+          * otherwise the children function count and length of run time is plotted on the backtrace graph
+          */
+        else {
+          if ($capture_function_children_flag) {
+            // Check to see if the current level is lower than the last captured function depth
+            // If so, then either reduce the capture function level depth if it is a nested function
+            // or stop capturing the child functions of the forwardtraced capture function
+            if ($level <= $capture_function_level_array[$capture_function_depth]) {
+              // Check to see if it is at the initial depth, or if the depth needs to be reduced.
+              if ($capture_function_depth == 1) {
+                // The current $level is equal to or less than the capture function & is not a nested capture function
+                // and so stop marking functions as children of the capture function
+                $capture_function_children_flag = FALSE;
+              }
+              else {
+                // The previous nested capture function tree has ended, and so reduce the depth to the previous level
+                $reduce_depth_flag = TRUE;
+                while ($reduce_depth_flag) {
+                  // Check to see if the current level is less than or equal to the stored level at the previous depth --
+                  // while making sure not to decrement the depth down to 0
+                  if ($level <= $capture_function_level_array[$capture_function_depth-1] && $capture_function_depth >= 1) {
+                    // This marks the end of a previous nested capture function forward trace,
+                    // and so reduce the capture function depth & zero out the stored level array at that depth
+                    $capture_function_level_array[$capture_function_depth] = 0;
+                    $capture_function_depth--;
+                  }
+                  else {
+                    // Stop reducing the depth because this function's $level is now equal to or
+                    // greater than $capture_function_level_array[$capture_function_depth]
+                    $reduce_depth_flag = FALSE;
+                  }
+                }
+                // Do a final check after reducing the depth to see if the $level is equal to or less than
+                // the stored level @ capture_function_depth=1
+                if ($level <= $capture_function_level_array[$capture_function_depth]) {
+                  // Stop marking functions as children of the capture function
+                  $capture_function_children_flag = FALSE;
+                }
+              }
+            }
+
+            // Store the child data for this $capture_function
+            if ($capture_function_children_flag) {
+              // Save the children functions to the *.dot file if the Forwardtrace flag is set
+              if ($capture_function_forwardtrace_flag) {  
+                $output_to_dot_function[$function_count] = $output_to_dot_all[$function_count];
+              }
+              // Sum the total length of all of the children functions of the capture function
+              // Start at the lowest depth and loop through up to the current depth
+              $capture_function_depth_key = 1;
+              while ($capture_function_depth_key <= $capture_function_depth) {
+                $subgraph_cluster_count_index = $capture_function_cluster_number[$capture_function_depth_key];
+                $capture_function_children_time_sum[$subgraph_cluster_count_index] = $capture_function_children_time_sum[$subgraph_cluster_count_index] + $time_delta[$function_count];
+                $capture_function_children_count[$subgraph_cluster_count_index]++;
+                $capture_function_depth_key++;
+              }
+            }
+          }
+        }
+        $capture_contrib_functions_flag = FALSE;
+      }  // END of capturing the backtrace parent functions & forwardtrace children functions
+    
+      // Capture all of the functions in between {main} and menu_execute_active_handler @ level=2
+      // This contains the Drupal bootstrap section which doesn't have a lot of variations
+      if ($function_name == "{main}") {
+        $section_endpoint[1]['begin'] = $function_count;
+      }
+      // Capture all of the functions in between menu_execute_active_handler @ level=3 and theme @ level=2
+      // This section is usually the bulk of the relevent functions and may need to be broken up in order to be plotted all at once
+      // Section two is broken up into three equal sections in section numbers 4, 5 & 6
+      if ($function_name == "menu_execute_active_handler" && $level == 2) {
+        $section_endpoint[1]['end'] = $function_count-1;
+        $section_endpoint[2]['begin'] = $function_count;
+      }
+      // Capture all of the functions in between theme @ level=2 and the end
+      // This contains a lot of the theming-specific code.
+      if ($function_name == "theme" && $level == 2) {
+        $index_theme_executed = TRUE;
+        $section_endpoint[2]['end'] = $function_count-1;
+        $section_endpoint[3]['begin'] = $function_count;
+      }      
+    } 
+    $row++;
+  } 
+  // Determine the final $row number for the last subsection
+  if ($index_theme_executed) {
+    $section_endpoint[3]['end'] = $function_count;
+  }
+  else {
+    $section_endpoint[2]['end'] = $function_count;
+  }
+
+  // Sometimes the Main Section is too big to be plotted all at once, and so split it up into three equal sections
+  // Creating three main subsecions is an option that can be turned off in the admin section
+  $create_main_subsections = variable_get('visualize_backtrace_create_main_subsections', 1);
+  if ($create_main_subsections) {
+    $section_endpoint[4]['begin'] = $section_endpoint[2]['begin'];
+    $section_endpoint[4]['end'] = round(($section_endpoint[2]['end']-$section_endpoint[2]['begin'])/3) + $section_endpoint[4]['begin'];
+    $section_endpoint[5]['begin'] = $section_endpoint[4]['end'];
+    $section_endpoint[5]['end'] = round(($section_endpoint[2]['end']-$section_endpoint[2]['begin'])/3) + $section_endpoint[5]['begin'];
+    $section_endpoint[6]['begin'] = $section_endpoint[5]['end'];
+    $section_endpoint[6]['end'] = $section_endpoint[2]['end'];
+    $section = 6;
+    $main_sections = 6;
+  }
+  else {
+    $section = 3;
+    $main_sections = 3;
+  }
+  
+  //// DEBUGGING: Print the start and stop row numbers for each of the 6 sections
+  //$i=1;
+  //while ($i <= $section) {
+  //  print $i ." begin = ". $section_endpoint[$i]['begin']. " end = ".  $section_endpoint[$i]['end'] ."<br>";
+  //  $i++;
+  //}
+
+  // Loop through each of the section numbers
+  $section_number = 0;
+  $output_to_dot = array();
+
+  // Section 0 contains all of the all three subsections
+  $output_to_dot[0] = 'digraph G {graph [ordering="out"]; node [style=filled];'. implode("", $output_to_dot_all) .'}';
+  $section_length[0] = count($output_to_dot_all);
+
+
+  // Add another section for the captured backtrace for a specific function if the
+  // arg(3) is either 'show_function_backtrace' or 'show_function_forwardtrace'
+  if ($capture_function_backtrace_flag) {
+    // Insert a box around the captured functions that includes the total number and length of child functions of each captured function
+    // The box is a "subgraph cluster" that is inserted after the nodal connection & before the node label
+    // This is done by replacing '"]; "' with the subgraph code of '"]; subgraph cluster1{color="#000000"; label="Function #01 w/ 8 children = 1.068ms" "'
+    foreach ($capture_function_index as $subcluster_count_key => $function_count_value) {
+      if ($capture_function_children_count[$subcluster_count_key] > 0) {
+        if ($capture_function_children_time_sum[$subcluster_count_key] > $time_threshold) {
+          // Place a red box around the functions that exceed the time threshold (default threshold is 5 ms)
+          $box_color = "#FF9BD1";
+          $add_mark = TRUE;
+        }
+        else {
+          // Place a green box around all of the other functions that are below the time threshold
+          $box_color = "#7FCDBB";
+          $add_mark = FALSE;
+        }
+        // Place a leading 0 before the fuction numbers less than 10
+        if ($subcluster_count_key < 10) {
+          // Re-save this capture function child data w/ the function count as the array index to display in the callstack table
+          $capture_function_child_data[$function_count_value] = 'Function #0'. $subcluster_count_key .' w/ '. $capture_function_children_count[$subcluster_count_key] .' children = '. $capture_function_children_time_sum[$subcluster_count_key] .'ms';
+        }
+        else {
+          // Re-save this capture function child data w/ the function count as the array index to display in the callstack table
+          $capture_function_child_data[$function_count_value] = 'Function #'. $subcluster_count_key .' w/ '. $capture_function_children_count[$subcluster_count_key] .' children = '. $capture_function_children_time_sum[$subcluster_count_key] .'ms';
+        }
+      }
+      // Add a green box around the functions that have no child functions
+      else {
+        $box_color = "#7FCDBB";
+        $add_mark = FALSE;
+        if ($subcluster_count_key < 10) {
+          $capture_function_child_data[$function_count_value] = 'Function #0'. $subcluster_count_key .' w/ 0 children';
+        }
+        else {
+          $capture_function_child_data[$function_count_value] = 'Function #'. $subcluster_count_key .' w/ 0 children';
+        }
+      }
+      $insert_string = '"]; subgraph cluster'. $subcluster_count_key .'{color="'. $box_color .'"; label="'. $capture_function_child_data[$function_count_value] .'" "';
+      $output_to_dot_function[$function_count_value] = preg_replace('/"]; "/', $insert_string, $output_to_dot_function[$function_count_value]) .'}';
+      // Highlight this data red when displayed in the table
+      if ($add_mark) {
+        $capture_function_child_data[$function_count_value] = '<span class="marker">'. $capture_function_child_data[$function_count_value] .'</span>';
+      }
+      // Calculate the average time of each captured function + it's children and divide by the total number of captured function clusters at the end
+      $capture_function_children_time_average = $capture_function_children_time_sum[$subcluster_count_key] + $time_delta[$function_count_value] + $capture_function_children_time_average;
+    }
+    $capture_function_children_time_total = $capture_function_children_time_average;
+    $capture_function_children_time_average = round($capture_function_children_time_average / $subgraph_cluster_count, 3);
+
+    // If there are three main subsections, then create a total of 7 *.dot sections.
+    if ($create_main_subsections) {
+      $section = 7;
+    }
+    else {
+      $section = 4;
+    }
+    $output_to_dot[$section] = 'digraph G {graph [ordering="out"]; node [style=filled];'. implode("", $output_to_dot_function) .'}';
+  }
+
+  $zgrviewer_location = variable_get('visualize_backtrace_zgrviewer_location', '/usr/local/bin/zgrviewer');
+
+  // Create the *.dot file for each subsection
+  while ($section_number <= $section) {
+    // The *.dot files for the six main sections are created by taking an array_slice of output_to_dot_all
+    // And the *.dot file for the captured function is created from the output_to_dot_function
+    if ($section_number > 0 && $section_number <= $main_sections) {
+      // Calculate how many function calls were made in each section
+      $section_length[$section_number] = $section_endpoint[$section_number]['end']-$section_endpoint[$section_number]['begin'];
+    
+      // Generate the *.dot file for each of three sub-sections
+      $output_to_dot[$section_number] = 'digraph G {graph [ordering="out"]; node [style=filled];'.
+                                          implode("", array_slice($output_to_dot_all, $section_endpoint[$section_number]['begin']-1, $section_length[$section_number]+1))
+                                       .'}';
+    }
+                       
+    // There is an extra space at the end of $unix_base_path that needs to be deleted.
+    $dot_file[$section_number] = trim($unix_base_path) ."/files/". $trace_number ."_section". $section_number .".dot";
+    $output_file = fopen($dot_file[$section_number], 'w');
+    fwrite($output_file, $output_to_dot[$section_number]);
+    fclose($output_file);
+    $command[$section_number] = $zgrviewer_location ."/run.sh --Pdot ". $dot_file[$section_number] ."; ";
+    $section_number++;
+  }
+
+  // ** OUTPUT THE LINKS TO THE GRAPHS & OUTPUT THE DATA **
+  // Clear out some of the large arrays
+  $output_to_dot = array();
+  $output_to_dot_all = array();
+  
+  $add_footnote = FALSE;
+
+  // Get the file sizes by piping in "ls -l" into awk and extracting the fifth column
+  // ls -l /Library/WebServer/Documents/d52/files/1189710511* | awk '{print $5}'
+  $get_file_sizes_command = "ls -l ". trim($unix_base_path) ."/files/". $trace_number ."* | awk '{print $5}'";
+  exec($get_file_sizes_command, $files_output);
+  
+  // Add a note to any file sizes that are greater than 1000000 bytes
+  foreach ($files_output as $section_key => $filesize_value) {
+    if ($filesize_value > 1000000) {
+      $files_output[$section_key] = $files_output[$section_key] .' bytes [*]';
+      $add_footnote = TRUE;
+    }
+    else {
+      $files_output[$section_key] = $files_output[$section_key] .' bytes';
+    }
+  }
+
+  // Indicate where the trace file originated if it was called directly from the page load
+  // Don't display the HTTP reference if the previous a page had visualize_backtrace as arg(0)
+  // Determine which array position arg(0) is located in the exploded HTTP_REFERER array
+  // by counting the length of the exploded $base_url
+  $http_reference = explode('/', $_SERVER['HTTP_REFERER']);
+  if ($http_reference[count(explode('/', $base_url))] != "visualize_backtrace") {
+    $output = '<br />Graph of '. l($_SERVER['HTTP_REFERER'], $_SERVER['HTTP_REFERER']) .'<br />';
+  }
+  else {
+    $output = '';
+  }
+  
+  $output .= t('The %trace_file page load executed in %final_time milleseconds<br />', array('%trace_file' => $trace_file, '%final_time' => round($final_time * 1000, 3))); // DELETED FOR NOW: with a memory footprint of '. round($final_memory / 1000, 3) .' kB. 
+  // $output .= 'The page load for this trace executed in <em>'. round($final_time * 1000, 3) .'</em> milleseconds<br />'; // DELETED FOR NOW: with a memory footprint of '. round($final_memory / 1000, 3) .' kB. 
+  $output .= t('%total_rows Total Drupal Functions appearing in %section_length clusters after consolidating the repeating function loops.', array('%total_rows' => $total_rows, '%section_length' => $section_length[0])) .'<br />';
+  
+  $output .= '<br /><h3>Backtrace Graphs</h3>';
+  // TODO: Possibly replace this hardcoded table with the Drupal table theming as in devel_query_table($queries, $counts);
+  $output .= '<table>';
+  $output .= '<tr><td>0.) Full Backtrace</td><td>'. $section_length[0] .' functions</td><td>'. $files_output[0] .' </td><td>'. l('Graph Full Backtrace', 'visualize_backtrace/'. $trace_number .'/view_callstack/section_0') .'</td></tr>';
+  // Indent each table to make the parent/child relationships clear
+  // The section lengths calculated above were for the correct partitioning of the $output_to_dot_all data
+  // through the array_slice & implosion when creating the *.dot files, and so add 1 to get the correct section lengths
+  $output .= '<tr><td> &nbsp;&nbsp;&nbsp;&nbsp; 1.) Drupal Bootstrap</td><td> &nbsp;&nbsp;&nbsp;&nbsp; '. ($section_length[1] + 1) .' functions</td><td> &nbsp;&nbsp;&nbsp;&nbsp; '. $files_output[1] .' </td><td> &nbsp;&nbsp;&nbsp;&nbsp; '. l('Graph Bootstrap Section Backtrace', 'visualize_backtrace/'. $trace_number .'/view_callstack/section_1') .'</td></tr>';
+  $output .= '<tr><td> &nbsp;&nbsp;&nbsp;&nbsp; 2.) Main Section</td><td> &nbsp;&nbsp;&nbsp;&nbsp; '. ($section_length[2] + 1) .' functions</td><td> &nbsp;&nbsp;&nbsp;&nbsp;'. $files_output[2] .' </td><td> &nbsp;&nbsp;&nbsp;&nbsp; '. l('Graph Main Section Backtrace', 'visualize_backtrace/'. $trace_number .'/view_callstack/section_2') .'</td></tr>';
+  if ($create_main_subsections) {
+    $output .= '<tr><td> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 4.) Main (Part 1/3)</td><td> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; '. $section_length[4] .' functions</td><td> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; '. $files_output[4] .' </td><td> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; '. l('Graph Main Section 1', 'visualize_backtrace/'. $trace_number .'/view_callstack/section_4') .'</td></tr>';
+    $output .= '<tr><td> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 5.) Main (Part 2/3)</td><td> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; '. $section_length[5] .' functions</td><td> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; '. $files_output[5] .' </td><td> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; '. l('Graph Main Section 2', 'visualize_backtrace/'. $trace_number .'/view_callstack/section_5') .'</td></tr>';
+    $output .= '<tr><td> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 6.) Main (Part 3/3)</td><td> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; '. ($section_length[6] + 1) .' functions</td><td> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; '. $files_output[6] .' </td><td> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; '. l('Graph Main Section 3', 'visualize_backtrace/'. $trace_number .'/view_callstack/section_6') .'</td></tr>';
+  }
+  // Check to see if the theme() function was even called from index.php.  If the section length is 0, then don't output a link to it.
+  if ($section_length[3] > 0) {
+    $output .= '<tr><td> &nbsp;&nbsp;&nbsp;&nbsp; 3.) Theming</td><td> &nbsp;&nbsp;&nbsp;&nbsp;'. ($section_length[3] + 1) .' functions</td><td> &nbsp;&nbsp;&nbsp;&nbsp; '. $files_output[3] .' </td><td> &nbsp;&nbsp;&nbsp;&nbsp; '. l('Graph Theme Section Backtrace', 'visualize_backtrace/'. $trace_number .'/view_callstack/section_3') .'</td></tr>';
+  }
+  $output .= '</table>';
+
+  // Add a footnote if if there are any files larger than 1000000 bytes
+  if ($add_footnote) $output .= '<em>[*] - Indicates a large file size, which either takes longer to plot or doesn\'t plot at all.<br /><br /></em>';
+  
+  // If any function or filename backtraces were captured, then publish another header with more details and links
+  if ($capture_function_backtrace_flag) {
+    if ($capture_function_forwardtrace_flag) {
+      $add_text = ' and Forwardtraces';
+    }
+    // Create the header information for when a specific function is passed in via arg(4)
+    if ($subsection_argument == "show_function_backtrace" || $subsection_argument == "show_function_forwardtrace") {
+      $output .= '<h3>Backtraces'. $add_text .' for the Function "'. $capture_function .'"</h3>';
+      // TODO: Possibly replace this hardcoded table with the Drupal table theming as in devel_query_table($queries, $counts);
+      $output .= '<table><tr><td>'. $section .'.) "'. $capture_function .'"</td><td>'. count($output_to_dot_function) .' total functions</td><td>'. $files_output[7] .' </td><td>'. 
+      l('Graph Backtrace', 'visualize_backtrace/'. $trace_number .'/view_callstack/show_function_backtrace/'. $capture_function) .'<br />'. 
+      l('Graph Forwardtrace', 'visualize_backtrace/'. $trace_number .'/view_callstack/show_function_forwardtrace/'. $capture_function) .'</td></tr></table>';
+    }
+    else {
+      // Create the header information for when all of the contributed module functions are being captured
+      // (i.e. arg(4) = "capture_all_contrib_functions")
+      if ($capture_filename == 'capture_all_contrib_functions') {
+        if ($contrib_module_filepath == 'sites/') {
+          $argument_label = "All Contributed Module Functions";
+        }
+        else {
+          $argument_label = 'Functions from '. $contrib_module_filepath;
+        }
+        
+        $output .= '<h3>Backtraces'. $add_text .' of '. $argument_label .'</h3>';
+        // TODO: Possibly replace this hardcoded table with the Drupal table theming as in devel_query_table($queries, $counts);
+        $output .= '<table><tr><td>'. $section .'.) '. $argument_label .'</td><td>'. count($output_to_dot_function) .' total functions</td><td>'. $files_output[7] .' </td><td>'. 
+        l('Graph Backtrace', 'visualize_backtrace/'. $trace_number .'/view_callstack/show_filename_backtrace/capture_all_contrib_functions') .'<br />'. 
+        l('Graph Forwardtrace', 'visualize_backtrace/'. $trace_number .'/view_callstack/show_filename_forwardtrace/capture_all_contrib_functions') .'</td></tr></table>';
+      }
+      // Otherwise print out the header information for when a specific filename is being captured
+      else {
+        // Replace the filepath '/' with '-' to create one URL argument
+        $graph_filename = preg_replace('/\//', '-', $capture_filename);
+        $output .= '<h3>Backtraces'. $add_text .' of All Functions from the Filename "'. $capture_filename .'"</h3>';
+        // TODO: Possibly replace this hardcoded table with the Drupal table theming as in devel_query_table($queries, $counts);
+        $output .= '<table><tr><td>'. $section .'.) "'. $capture_filename .'"</td><td>'. count($output_to_dot_function) .' total functions</td><td>'. $files_output[7] .' </td><td>'. 
+        l('Graph Backtrace', 'visualize_backtrace/'. $trace_number .'/view_callstack/show_filename_backtrace/'. $graph_filename) .'<br />'. 
+        l('Graph Forwardtrace', 'visualize_backtrace/'. $trace_number .'/view_callstack/show_filename_forwardtrace/'. $graph_filename) .'</td></tr></table>';
+      }
+    }
+  }
+
+  // Print out the all of the function call stack data
+  $output .= '<h3>Function Call Stack</h3>';
+
+  // Determine if arg(3) passes in a specific function number (e.g. 'section_2')
+  // This variable will also be used later for plotting the flowchart for this section
+  $output_section_number = explode('_', $subsection_argument);
+  $output_section_number = $output_section_number[1];
+
+  // Display the full function call stack table when all_sections  
+  if (arg(2) == "view_callstack") {
+    // Output all of the function call stack if a specific section isn't being passed in via arg(3)
+    // Or if the $output_section_number is 0, then all of the functions should be displayed
+    if ($subsection_argument == "all_sections" || $subsection_argument == "section_0") {
+      $output_function_call_stack = TRUE;
+      $output_all_functions = TRUE;
+      $output .= t('Viewing the <em>Full Function Call Stack</em> for this Trace.<br />Drupal functions taking longer than %threshold ms are <span class="marker">highlighted</span>.', array('%threshold' => variable_get('visualize_backtrace_execution_threshold', 5))) .'<br /><br />';
+    }
+    // Output a partial section of the call stack if the $output_section_number is numeric
+    else {
+      if (is_numeric($output_section_number) && $output_section_number <= 6) {
+        $output_function_call_stack = TRUE;
+        $output_all_functions = FALSE;
+        $output_section_label = array(1 => 'Drupal Bootstrap Section', 2 => 'Main Section', 3 => 'Theming Section', 4 => 'Main Section (Part 1/3)', 5 => 'Main Section (Part 2/3)', 6 => 'Main Section (Part 3/3)');
+        // Output a specific section of the function call stack determined by the argument being passed in
+        $output .= t('Viewing the "%output_section_label" of the Function Call Stack for this Trace <br />Drupal functions taking longer than %threshold ms are <span class="marker">highlighted</span>.', array('%output_section_label' => $output_section_label[$output_section_number], '%threshold' => variable_get('visualize_backtrace_execution_threshold', 5))) .'<br /><br />';
+      }
+      // When arg(3) = show_function_backtrace or show_function_forwardtrace, then show the call stack for that function
+      else if ($capture_function_backtrace_flag) {
+        $output_function_call_stack = TRUE;
+        $output_all_functions = FALSE;
+        // Output a specific section of the function call stack determined by the argument being passed in (either by function or filename)
+        if ($subsection_argument == "show_function_backtrace" || $subsection_argument == "show_function_forwardtrace") {
+          $output .= t('Viewing the Backtraces '. $add_text .' for the Function "%capture_function." <br />Drupal functions taking longer than %threshold ms are <span class="marker">highlighted</span>.', array('%capture_function' => $capture_function, '%threshold' => variable_get('visualize_backtrace_execution_threshold', 5))) .'<br /><br />';
+          $argument_label = 'the "'. $capture_function .'" function';
+        }
+        elseif ($capture_filename == 'capture_all_contrib_functions') {
+          $output .= t('Viewing the Backtraces '. $add_text .' for %argument_label <br />Drupal functions taking longer than %threshold ms are <span class="marker">highlighted</span>.', array('%argument_label' => $argument_label, '%threshold' => variable_get('visualize_backtrace_execution_threshold', 5))) .'<br /><br />';
+        }
+        else {
+          $output .= t('Viewing the Backtraces '. $add_text .' for All of the Functions from the Filename "%capture_filename" <br />Drupal functions taking longer than %threshold ms are <span class="marker">highlighted</span>.', array('%capture_filename' => $capture_filename, '%threshold' => variable_get('visualize_backtrace_execution_threshold', 5))) .'<br /><br />';
+          $argument_label = 'functions from "'. $capture_filename .'"';
+        }
+              
+        $output .= t('There was a total of %subgraph_cluster_count clusters and total of %capture_function_count non-repeating occurances of %argument_label.', array('%subgraph_cluster_count' => $subgraph_cluster_count, '%capture_function_count' => $capture_function_count, '%argument_label' => $argument_label)) .'<br />';
+        $output .= t("The average time for each function and all of it's children is %capture_function_children_time_average ms, which includes any repeating & nested loop clusters (i.e. %capture_function_children_time_total ms / %subgraph_cluster_count clusters)", array('%capture_function_children_time_average' => $capture_function_children_time_average, '%capture_function_children_time_total' => $capture_function_children_time_total, '%subgraph_cluster_count' => $subgraph_cluster_count)) .'<br /><br />';        
+      }
+        
+    // Provide a link to the Full Function Call Stack since only a subsection is currently being shown
+    $output .= '* View the '. l('Full Function Call Stack', 'visualize_backtrace/'. $trace_number .'/view_callstack/all_sections') .' for this Trace.<br />';
+    }
+  }
+  else {
+    // Arg(2) is set to hide_callstack so the text table of all of the function call stack
+    // won't be displayed and will save a bit of processing time.
+    $output_function_call_stack = FALSE;
+
+    // Provide a link to the Full Function Call Stack since all of the function call stacks are being hidden
+    $output .= '* View the '. l('Full Function Call Stack', 'visualize_backtrace/'. $trace_number .'/view_callstack/all_sections') .' for this Trace.<br />';
+  }
+
+  // Add in a link to view the backtraces for all of the contributed module functions
+  $output .= '* Graph the '. l('Contributed Module Function Backtraces', 'visualize_backtrace/'. $trace_number .'/view_callstack/show_filename_backtrace/capture_all_contrib_functions') .'<br />';
+  $output .= '* Graph the '. l('"db_query" Function Backtraces', 'visualize_backtrace/'. $trace_number .'/view_callstack/show_function_backtrace/db_query') .'<br />';
+
+  // Output a table of the Function Call Stack if the flag was set to true directly above
+  if ($output_function_call_stack) {
+    $row = 1;
+    $function_count = 0;
+    $stop_at_row = count($function_call_data);
+    
+    // Set this flag to true in order to debug the duplication deletion logic,
+    // which will display the repeating fuctions as well as the duplication tables
+    $debug_duplication = variable_get('visualize_backtrace_debug_duplication', 0);
+    
+    // First print out the table headers for the function call stack data
+    // TODO: Possibly replace this hardcoded table with the Drupal table theming as in devel_query_table($queries, $counts);
+    $output .= '<table><thead><tr><th>Funct Count</th>
+                           <th>Level</th>
+                           <th>Function Name</th>';
+    // If the backtrace or forward trace is selected, then add info about the captured function children
+    if ($capture_function_backtrace_flag) {
+      $output .=          '<th>Captured Function Children</th>';
+    }
+    $output .=            '<th>Line #</th>';
+                           
+    // Display the Duplication Tables for debugging purposes
+    if ($debug_duplication) {
+      $output .= '<th>Function Repeat Table<br />one_function_repeat *<br />two_function_calculate_1<br />two_function_calculate_2<br />two_function_repeat *<br />three_function_calculate_1<br />three_function_calculate_2<br />three_function_calculate_3<br />three_function_repeat</th>
+                  <th>Function Repeat</th>';
+    }
+    $output .=             '<th>Graph Function Trace</th>
+                            <th>Graph Section</th>
+                            <th>Repeat</th>
+                            <th>Time Delta (ms)</th>';
+    //$output .=             '<th>Memory Delta (kB)</th>';
+    $output .=             '<th>Graph Filename Trace</th>
+                            <th>via Filename</th>
+                            <th>Original Trace Function Number</th>
+                            </tr></thead><tbody>';
+                            
+    // Add odd/even class
+    $flip = array('even' => 'odd', 'odd' => 'even');
+    $class = 'even';
+    
+    // Loop through all of the rows that were read in from the parsed trace file
+    while ($row <= $stop_at_row) {
+      // Process and display only the non-repeating functions, unless the debug_duplication flag is set
+      if ($function_call_data[$row]['function_repeat_number'] == 0 || $debug_duplication) {
+        // Check to see if this function will start to repeat, and determine whether it is a single, double or triple repeating function
+        if ($function_call_data[$row]['repeating_function_label']) {
+          $repeating_function_label = $function_call_data[$row]['repeating_function_label'];
+          // Delete the '\n ** REPEAT -- ' at the beginning of this label, which is intended for the *.dot flowchart label
+          $repeating_function_label = substr($repeating_function_label, (strlen($repeating_function_label)-15) * -1);
+        }
+        else {
+          $repeating_function_label = "";
+        }
+    
+        $function_count = $function_call_data[$row]['function_count'];
+
+        // Put an 'f' in front of the function count for non-repeating functions to match the backtrace graph syntax, which makes
+        // it easier to search for specific function count numbers (e.g. 'f36' is distinguished from line 36 or 536, etc)
+        if ($function_call_data[$row]['function_count']) {
+          $function_count_label = 'f'. $function_call_data[$row]['function_count'];
+        }
+        else {
+          $function_count_label = '';
+        }
+
+        // Add a table background color to the function name determined by the filename that called the function
+        if ($lookup_table[$function_call_data[$row]['via_filename']]["node_color_hex"]) {
+          $colored_td_function = '<td bgcolor='. $lookup_table[$function_call_data[$row]['via_filename']]["node_color_hex"] .'>';
+        }
+        else {
+          $colored_td_function = '<td bgcolor=#BBBBBB>';
+        }
+
+        // If either the backtrace or forwardtrace of this fuction was captured, then change the level color to red
+        // Also add in the child function data
+        if ($capture_function_backtrace_flag) {
+          if ($capture_function_flag[$function_call_data[$row]['function_count']]) {
+            $colored_td_level = '<td bgcolor=#FF9BD1>';
+          }
+          else {
+            $colored_td_level = '<td>';
+          }
+        }
+        else {
+          $colored_td_level = '<td>';
+        }
+
+        // Keep track of the backtrace of line numbers because the procedural Drupal hooks have line = 0
+        $function_call_stack[$function_call_data[$row]['level']] = $function_call_data[$row]['line_number'];
+
+        // Add indention spaces to simulate a hierarchical listing of the function call stack
+        $level_indent_spaces = '';
+        $loop = 1;
+        $level = $function_call_data[$row]['level'];
+        while ($loop <= $level-1) {
+            $level_indent_spaces .= '&nbsp;&nbsp;';
+            $loop++;
+        }
+    
+        // If the Drupal function is called from a PHP function (i.e. line = 0), then swap out the line number
+        // w/ previous PHP function's line number and add a note within the level box
+        if ($function_call_data[$row]['via_PHP_function']) {
+          $line_number = $function_call_stack[$function_call_data[$row]['level']-1];
+          $via_PHP_function = ' [via hook]';
+        }
+        else {
+          $line_number = $function_call_data[$row]['line_number'];
+          $via_PHP_function = '';
+        }
+        
+        // Set the output section to false, and it'll be set back to true for each given section.
+        $output_section_flag[$output_section_number] = FALSE;
+        
+        if ($function_call_data[$row]['function_count'] > 0 && $function_call_data[$row]['function_count'] < $section_endpoint[2]['begin']) {
+          // Note for graphs of 3500 nodes and larger, the Drupal l($path,$link_title) method is about twice as slow than hardcoding <a href="">
+          // l() ~ 1.4 ms x 3500 functions x 6 times per function = 29.4 extra seconds
+          $graph_section = '<a href="'. $base_url .'/visualize_backtrace/'. $trace_number .'/view_callstack/section_1">Graph Bootstrap</a>';
+          $output_section_flag[1] = TRUE;
+        }
+        else {
+          $graph_section = '';
+        }
+        
+        if ($create_main_subsections) {
+          if ($function_call_data[$row]['function_count'] >= $section_endpoint[4]['begin'] && $function_call_data[$row]['function_count'] < $section_endpoint[5]['begin']) {
+            $graph_section = '<a href="'. $base_url .'/visualize_backtrace/'. $trace_number .'/view_callstack/section_2">Graph Main</a> / <a href="'. $base_url .'/visualize_backtrace/'. $trace_number .'/view_callstack/section_4">P1</a>';
+            $output_section_flag[2] = TRUE;
+            $output_section_flag[4] = TRUE;          
+          }
+          if ($function_call_data[$row]['function_count'] >= $section_endpoint[5]['begin'] && $function_call_data[$row]['function_count'] < $section_endpoint[6]['begin']) {
+            $graph_section = '<a href="'. $base_url .'/visualize_backtrace/'. $trace_number .'/view_callstack/section_2">Graph Main</a> / <a href="'. $base_url .'/visualize_backtrace/'. $trace_number .'/view_callstack/section_5">P2</a>';
+            $output_section_flag[2] = TRUE;
+            $output_section_flag[5] = TRUE;
+          }
+          if ($function_call_data[$row]['function_count'] >= $section_endpoint[6]['begin'] && $function_call_data[$row]['function_count'] <= $section_endpoint[6]['end']) {
+            $graph_section = '<a href="'. $base_url .'/visualize_backtrace/'. $trace_number .'/view_callstack/section_2">Graph Main</a> / <a href="'. $base_url .'/visualize_backtrace/'. $trace_number .'/view_callstack/section_6">P3</a>';
+            $output_section_flag[2] = TRUE;
+            $output_section_flag[6] = TRUE;
+          }
+        }
+        else {
+          if ($function_call_data[$row]['function_count'] >= $section_endpoint[2]['begin'] && $function_call_data[$row]['function_count'] < $section_endpoint[3]['begin']) {
+            $graph_section = '<a href="'. $base_url .'/visualize_backtrace/'. $trace_number .'/view_callstack/section_2">Graph Main</a>';
+            $output_section_flag[2] = TRUE;
+          }
+        }
+        
+        if ($function_call_data[$row]['function_count'] >= $section_endpoint[3]['begin'] && $function_call_data[$row]['function_count'] <= $section_endpoint[3]['end']) {
+          $graph_section = '<a href="'. $base_url .'/visualize_backtrace/'. $trace_number .'/view_callstack/section_3">Graph Theme</a>';
+          $output_section_flag[3] = TRUE;
+        }
+                
+        if ($time_delta[$function_count] > $time_threshold) {
+          $mark_open = '<span class="marker">';
+          $mark_close ='</span>';
+        }
+        else {
+          $mark_open = '';
+          $mark_close ='';            
+        }
+                
+        if ($output_section_flag[$output_section_number] || $output_all_functions || $output_to_dot_function[$function_call_data[$row]['function_count']]) {
+          // Replace the '/' filename delimiters with '-' to create a single argument that can be broken back up when graphed
+          $graph_filename = preg_replace('/\//', '-', $function_call_data[$row]['via_filename']);
+
+          $class = $flip[$class];
+          $output .= '<tr class="'. $class .'"><td>'. $function_count_label .'</td>';
+          $output .= $colored_td_level . $function_call_data[$row]['level'] .'</td>'. $colored_td_function . $level_indent_spaces . $function_call_data[$row]['function_name']
+                    .' <a href="http://api.drupal.org/api/function/'. $function_call_data[$row]['function_name'] .'/'. $drupal_version .'">*</a> '. $via_PHP_function .'</td>';
+          if ($capture_function_backtrace_flag) {
+            $output .= '<td>'. $capture_function_child_data[$function_count] .'</td>';
+          }
+          $output .= '<td>line #<a href="'. $lookup_table[$function_call_data[$row]['via_filename']]["source_code_line_url"] . $line_number .'">'. $line_number .'</a></td>';
+          
+          // For DEBUGGING PURPOSES: Look at the Duplication Tables
+          if ($debug_duplication) {
+            $output .= '<td>'. $function_call_data[$row]['one_function_repeat'] ." * ". $function_call_data[$row]['two_function_calculate_1']  
+                       ."|". $function_call_data[$row]['two_function_calculate_2'] ."|". $function_call_data[$row]['two_function_repeat'] 
+                       ." * ". $function_call_data[$row]['three_function_calculate_1'] ."|". $function_call_data[$row]['three_function_calculate_2'] 
+                       ."|". $function_call_data[$row]['three_function_calculate_3'] ."|". $function_call_data[$row]['three_function_repeat']
+                       .'</td>';
+            $output .= '<td>'. $function_call_data[$row]['function_repeat_number'] .'</td>';
+          }
+          $output .= '<td><a href="'. $base_url .'/visualize_backtrace/'. $trace_number .'/view_callstack/show_function_backtrace/'. $function_call_data[$row]['function_name'] .'">Backtrace</a> / '
+                     .'<a href="'. $base_url .'/visualize_backtrace/'. $trace_number .'/view_callstack/show_function_forwardtrace/'. $function_call_data[$row]['function_name'] .'">Forwardtrace</a></td>';
+          $output .= '<td>'. $graph_section .'</td>';
+          $output .= '<td>'. $repeating_function_label .'</td>';
+          $output .= '<td>'. $mark_open . $time_delta[$function_count] . $mark_close .'</td>';
+          //$output .= '<td>'. $memory_delta[$function_count] .'</td>';
+          $output .= '<td><a href="'. $base_url .'/visualize_backtrace/'. $trace_number .'/view_callstack/show_filename_backtrace/'. $graph_filename .'">Backtrace</a> / '
+                     .'<a href="'. $base_url .'/visualize_backtrace/'. $trace_number .'/view_callstack/show_filename_forwardtrace/'. $graph_filename .'">Forwardtrace</a></td>';
+          $output .= '<td>'. $function_call_data[$row]['via_filename']  .'</td>';
+          $output .= '<td>'. $function_call_data[$row]['function_number'] .'</td></tr>';
+        }
+      } 
+      $row++;
+    }
+    $output .= '<tbody></table>';
+  } 
+  
+  // Print out the CLI commands in order to open up the *.dot flowchart files directly from the terminal
+  $output .= '<br />';
+  $output .= '<h3>Command Line Commands to Graph the Flowchart for Each Section</h3>';
+  foreach ($command as $data_loop) {
+    $output .= '<li>'. $data_loop .'</li>';
+  }
+  $output .= '<br />';
+  
+  // Call ZGRViewer from the commandline to automatically plot the backtrace flowchart
+  // graph section listed in arg(3).  
+  if (is_numeric($output_section_number) && $output_section_number <= 6) {
+    $graph_section = TRUE;
+  }
+  else {
+    $graph_section = FALSE;
+  }
+  
+  // if arg(3) = show_function_backtrace or show_function_forwardtrace (i.e. exploded to "function"),
+  // then graph the flowchart of the tree whereever the function listed in arg(4) appears
+  if ($capture_function_backtrace_flag) {
+    $graph_section = TRUE;
+    // The $section variable contains the last section value -- usually either 7 or 4
+    $output_section_number = $section;
+  }
+  
+  // NOTE: In order to execute the following CLI command with shell_exec() directly from Drupal,
+  // then you may have to change some apache httpd.conf permissions as detailed in the INSTALL.txt.
+  // However, be warned that giving Drupal your user's UNIX permissions could be risky, and you
+  // may want to copy & paste the CLI commands directly into the terminal.
+  if ($graph_section) {
+ 
+    // Execute the CLI command to view the function call flowchart the ZGRViewer
+    shell_exec($command[$output_section_number]);
+    
+    // OPTIONAL: Generate the GraphViz CLI code to output a *.ps from the *.dot file for this section
+    // and then generate ImageMagick CLI code to convert the *.ps into a *.png, and then delete the intermediary *.ps file
+    // More GraphViz details can be found at http://del.icio.us/kentbye/graphviz
+    if (arg(4) == "output_to_png" || arg(5) == "output_to_png" || arg(6) == "output_to_png") {
+      // First create a postscript *.ps file from the *.dot file with GraphViz's dot command
+      $convert_command = "/usr/local/bin/dot -Tps -o ". trim($unix_base_path) ."/files/". $trace_number ."_section". $output_section_number  .".ps ". trim($unix_base_path) ."/files/". $trace_number ."_section". $output_section_number .".dot; ";
+      // Then convert create a postscript *.ps file from the *.dot file with ImageMagick's convert command
+      $convert_command .= "convert -antialias ". trim($unix_base_path) ."/files/". $trace_number ."_section". $output_section_number .".ps ". trim($unix_base_path) ."/files/". $trace_number ."_section". $output_section_number .".png; ";
+      // Then delete the intermediate *.ps file
+      $convert_command .= "rm ". trim($unix_base_path) ."/files/". $trace_number ."_section". $output_section_number .".ps;";
+      // NOTE: executing the $convert_command from shell_exec does not appear to be working, and so copy & paste
+      // the code into the terminal. I've also had troubles creating a PNG with over 1000 functions without it getting corrupted
+      $output .= '<h3>Command Line Command to Create a PNG of this Section</h3>';
+      $output .= $convert_command ."<br />";
+    } 
+  }
+
+  return $output;
+}
+
+/**
+ * Detects looping functions in 1, 2 or 3 repeating function pairs
+ * The returned values are described below
+ *
+ * If any of these are = 0, then it is not flagged for being a repeating function
+ *
+ *   $function_call_data[$row]['function_repeat']
+ *   $function_call_data[$row]['one_function_repeat'] = 0;
+ *   $function_call_data[$row]['two_function_calculate_1'] = 0;   
+ *   $function_call_data[$row]['two_function_calculate_2'] = 0;
+ *   $function_call_data[$row]['two_function_repeat'] = 0;
+ *   $function_call_data[$row]['three_function_calculate_1'] = 0;
+ *   $function_call_data[$row]['three_function_calculate_2'] = 0;
+ *   $function_call_data[$row]['three_function_calculate_3'] = 0;
+ *   $function_call_data[$row]['three_function_repeat'] = 0;
+ *   $function_call_data[$row]['function_repeat_number'] = 0;
+ *   $function_call_data[$row]['repeating_function_label'] = "";
+ *   $function_call_data[$row]['repeating_function_count'] = 0;
+ */
+function visualize_backtrace_detect_repeating_functions(&$function_call_data) {
+  $total_rows = count($function_call_data);
+  // Assume that there are no duplicates in the first 4 rows
+  // Zero out the first three rows
+  $duplicate_row = 6;
+  $row = 1;
+  while ($row < $duplicate_row) {
+    $function_call_data[$row]['function_repeat'] = 0;
+    $function_call_data[$row]['one_function_repeat'] = 0;
+    $function_call_data[$row]['two_function_calculate_1'] = 0;
+    $function_call_data[$row]['two_function_calculate_2'] = 0;
+    $function_call_data[$row]['two_function_repeat'] = 0;
+    $function_call_data[$row]['three_function_calculate_1'] = 0;
+    $function_call_data[$row]['three_function_calculate_2'] = 0;
+    $function_call_data[$row]['three_function_calculate_3'] = 0;
+    $function_call_data[$row]['three_function_repeat'] = 0;
+    $function_call_data[$row]['function_repeat_number'] = 0;
+    $function_call_data[$row]['repeating_function_label'] = "";
+    $row++;
+  }
+  
+  while ($duplicate_row < $total_rows+1) {
+    // Check for duplications of single functions
+    // TODO: Document all of this in human readable language
+    // In the meantime set the $debug_duplication flag to true to see the Duplication calculation table
+    if ($function_call_data[$duplicate_row]['function_name'] == $function_call_data[$duplicate_row-1]['function_name'] &&
+        $function_call_data[$duplicate_row]['line_number'] == $function_call_data[$duplicate_row-1]['line_number']) {
+      // Make sure that the previous row is not either a two or three-function repeat
+      if ($function_call_data[$duplicate_row-1]['two_function_repeat'] == 0 && $function_call_data[$duplicate_row-1]['three_function_repeat'] == 0) {
+        // Set the repeating functions to TRUE
+        $function_call_data[$duplicate_row]['one_function_repeat'] = 1;
+      }
+      else {
+        $function_call_data[$duplicate_row]['one_function_repeat'] = 0;
+      }
+    }
+    else {
+      $function_call_data[$duplicate_row]['one_function_repeat'] = 0;
+    }
+
+    // Test to see if this function is the first repeating function in a 2-function pair iteration
+    if ($function_call_data[$duplicate_row]['function_name'] == $function_call_data[$duplicate_row-2]['function_name'] &&
+        $function_call_data[$duplicate_row]['line_number'] == $function_call_data[$duplicate_row-2]['line_number'] &&
+        $function_call_data[$duplicate_row-1]['function_name'] == $function_call_data[$duplicate_row-3]['function_name'] &&
+        $function_call_data[$duplicate_row-1]['line_number'] == $function_call_data[$duplicate_row-3]['line_number'] ) {
+        // Set the two_function_calculate1 to TRUE because it's a part of a repeating function pair
+        $function_call_data[$duplicate_row]['two_function_calculate_1'] = 1;
+    }
+    else {
+      $function_call_data[$duplicate_row]['two_function_calculate_1'] = 0;
+    }
+    
+    // Test to see if this function is the second repeating function in a 2-function pair iteration
+    if ($function_call_data[$duplicate_row]['function_name'] == $function_call_data[$duplicate_row-2]['function_name'] &&
+        $function_call_data[$duplicate_row]['line_number'] == $function_call_data[$duplicate_row-2]['line_number'] &&
+        $function_call_data[$duplicate_row+1]['function_name'] == $function_call_data[$duplicate_row-1]['function_name'] &&
+        $function_call_data[$duplicate_row+1]['line_number'] == $function_call_data[$duplicate_row-1]['line_number'] ) {
+      // Set the two_function_calculate1 to TRUE because it's a part of a repeating function pair
+      $function_call_data[$duplicate_row]['two_function_calculate_2'] = 1;
+    }
+    else {
+      $function_call_data[$duplicate_row]['two_function_calculate_2'] = 0;
+    }
+
+    // Determine if this is a repeating two-function pair
+    // TODO: Translate this mysterious checks into ordinary language
+    // For two function repeats, the current and previous row can not be a one function repeat 
+    if (!$function_call_data[$duplicate_row]['one_function_repeat'] && !$function_call_data[$duplicate_row-1]['one_function_repeat']) {
+      if (!$function_call_data[$duplicate_row-1]['one_function_repeat'] && $function_call_data[$duplicate_row-1]['two_function_repeat']) {
+        $function_call_data[$duplicate_row]['two_function_repeat'] = $function_call_data[$duplicate_row]['two_function_calculate_1'];
+      }
+      else {
+        if (!$function_call_data[$duplicate_row]['one_function_repeat']) {
+          $function_call_data[$duplicate_row]['two_function_repeat'] = $function_call_data[$duplicate_row]['two_function_calculate_2'];
+        }
+        else {
+          $function_call_data[$duplicate_row]['two_function_repeat'] = 1;
+        }
+      }
+    }
+    else {
+      $function_call_data[$duplicate_row]['two_function_repeat'] = 0;
+    }
+    
+    // Test to see if this function is the first repeating function in a 3-function pair iteration
+    if ($function_call_data[$duplicate_row-5]['function_name'] == $function_call_data[$duplicate_row-2]['function_name'] &&
+        $function_call_data[$duplicate_row-5]['line_number'] == $function_call_data[$duplicate_row-2]['line_number'] &&
+        $function_call_data[$duplicate_row-4]['function_name'] == $function_call_data[$duplicate_row-1]['function_name'] &&
+        $function_call_data[$duplicate_row-4]['line_number'] == $function_call_data[$duplicate_row-1]['line_number'] &&
+        $function_call_data[$duplicate_row-3]['function_name'] == $function_call_data[$duplicate_row]['function_name'] &&
+        $function_call_data[$duplicate_row-3]['line_number'] == $function_call_data[$duplicate_row]['line_number'] ) {
+      // Set the three_function_calculate1 to TRUE because it's a part of a repeating function pair
+      $function_call_data[$duplicate_row]['three_function_calculate_1'] = 1;
+    }
+    else {
+      $function_call_data[$duplicate_row]['three_function_calculate_1'] = 0;
+    }
+
+    // Test to see if this function is the second repeating function in a 3-function pair iteration
+    if ($function_call_data[$duplicate_row-4]['function_name'] == $function_call_data[$duplicate_row-1]['function_name'] &&
+        $function_call_data[$duplicate_row-4]['line_number'] == $function_call_data[$duplicate_row-1]['line_number'] &&
+        $function_call_data[$duplicate_row-3]['function_name'] == $function_call_data[$duplicate_row]['function_name'] &&
+        $function_call_data[$duplicate_row-3]['line_number'] == $function_call_data[$duplicate_row]['line_number'] &&
+        $function_call_data[$duplicate_row-2]['function_name'] == $function_call_data[$duplicate_row+1]['function_name'] &&
+        $function_call_data[$duplicate_row-2]['line_number'] == $function_call_data[$duplicate_row+1]['line_number'] ) {
+      // Set the three_function_calculate1 to TRUE because it's a part of a repeating function pair
+      $function_call_data[$duplicate_row]['three_function_calculate_2'] = 1;
+    }
+    else {
+      $function_call_data[$duplicate_row]['three_function_calculate_2'] = 0;
+    }
+
+    // Test to see if this function is the third repeating function in a 3-function pair iteration
+    if ($function_call_data[$duplicate_row-3]['function_name'] == $function_call_data[$duplicate_row]['function_name'] &&
+        $function_call_data[$duplicate_row-3]['line_number'] == $function_call_data[$duplicate_row]['line_number'] &&
+        $function_call_data[$duplicate_row-2]['function_name'] == $function_call_data[$duplicate_row+1]['function_name'] &&
+        $function_call_data[$duplicate_row-2]['line_number'] == $function_call_data[$duplicate_row+1]['line_number'] &&
+        $function_call_data[$duplicate_row-1]['function_name'] == $function_call_data[$duplicate_row+2]['function_name'] &&
+        $function_call_data[$duplicate_row-1]['line_number'] == $function_call_data[$duplicate_row+2]['line_number'] ) {
+      // Set the three_function_calculate1 to TRUE because it's a part of a repeating function pair
+      $function_call_data[$duplicate_row]['three_function_calculate_3'] = 1;
+    }
+    else {
+      $function_call_data[$duplicate_row]['three_function_calculate_3'] = 0;
+    }        
+
+    // Determine if this is a repeating three-function pair
+    // First determine that the previous three function pairs are not flagged as single or double repeats
+    if ($function_call_data[$duplicate_row-1]['two_function_repeat'] == 0 && $function_call_data[$duplicate_row-1]['one_function_repeat'] == 0 &&
+        $function_call_data[$duplicate_row-2]['two_function_repeat'] == 0 && $function_call_data[$duplicate_row-2]['one_function_repeat'] == 0 &&
+        $function_call_data[$duplicate_row-3]['two_function_repeat'] == 0 && $function_call_data[$duplicate_row-3]['one_function_repeat'] == 0) {
+      // TODO: Translate this mysterious checks into ordinary language
+      if (!$function_call_data[$duplicate_row-1]['one_function_repeat'] && $function_call_data[$duplicate_row-1]['three_function_calculate_2']) {
+        $function_call_data[$duplicate_row]['three_function_repeat'] = 1;
+      }
+      else {
+        if (!$function_call_data[$duplicate_row-1]['one_function_repeat'] && $function_call_data[$duplicate_row-1]['three_function_calculate_3']) {
+          $function_call_data[$duplicate_row]['three_function_repeat'] = 1;
+        }
+        else {
+          if (!$function_call_data[$duplicate_row]['one_function_repeat'] && $function_call_data[$duplicate_row]['three_function_calculate_3']) {
+            $function_call_data[$duplicate_row]['three_function_repeat'] = 1;
+          }
+          else {
+            $function_call_data[$duplicate_row]['three_function_repeat'] = 0;
+          }        
+        }
+      }
+    }
+    else {
+      $function_call_data[$duplicate_row]['three_function_repeat'] = 0;
+    }
+    
+    // If this row has been flagged as either a single, double or triple repeating function, then set function repeat to true
+    $function_call_data[$duplicate_row]['repeating_function_label'] = "";
+    if ($function_call_data[$duplicate_row]['one_function_repeat'] || $function_call_data[$duplicate_row]['two_function_repeat'] ||
+        $function_call_data[$duplicate_row]['three_function_repeat']) {
+      $function_call_data[$duplicate_row]['function_repeat'] = 1;
+      // Record whether it is a single, double or triple repeating function
+      if ($function_call_data[$duplicate_row]['one_function_repeat']) {
+        $function_call_data[$duplicate_row]['function_repeat_number'] = 1;
+        // If this is the first repeating function, then save this $row for counting purposes
+        if ($function_call_data[$duplicate_row - 1]['function_repeat_number'] == 0 ) $start_row = $duplicate_row;
+        
+      }
+      else {
+        if ($function_call_data[$duplicate_row]['two_function_repeat']) {
+          $function_call_data[$duplicate_row]['function_repeat_number'] = 2;
+          // If this is the first repeating function, then save this $row for counting purposes
+          if ($function_call_data[$duplicate_row - 1]['function_repeat_number'] == 0 ) $start_row = $duplicate_row;
+        }
+        else {
+          $function_call_data[$duplicate_row]['function_repeat_number'] = 3;
+          // If this is the first repeating function, then save this $row for counting purposes
+          if ($function_call_data[$duplicate_row - 1]['function_repeat_number'] == 0 ) $start_row = $duplicate_row;
+        }
+      }
+    }
+    else {
+      $function_call_data[$duplicate_row]['function_repeat'] = 0;
+      $function_call_data[$duplicate_row]['function_repeat_number'] = 0;
+
+      // Check to see if the previous row was single repeating function calculate the length & use it as a cluster label
+      if ($function_call_data[$duplicate_row - 1]['function_repeat_number'] == 1 ) {
+        $function_call_data[$start_row - 1]['repeating_function_label'] = '\n** REPEAT -- 1/1 Function: '. ($duplicate_row - $start_row + 1) .'x **';
+        $function_call_data[$start_row - 1]['repeating_function_count'] = $duplicate_row - $start_row + 1;
+      }
+        
+      // Check to see if the previous row was a pair of double repeating function calculate the length & use it as a cluster label
+      if ($function_call_data[$duplicate_row - 1]['function_repeat_number'] == 2 ) {
+        // If the total length of repeating double functions is not a multiple of two,
+        // then correct it by unmarking the previous row as a two_function_repeat
+        // & deleting one from the total length
+        $length = $duplicate_row - $start_row;
+        $remainder = ($length % 2);
+        if ($remainder) {
+          $function_call_data[$duplicate_row - 1]['two_function_repeat'] = 0;
+          $function_call_data[$duplicate_row - 1]['function_repeat_number'] = 0;
+          $function_call_data[$duplicate_row - 1]['function_repeat'] = 0;
+          $length = $length - $remainder;
+        }
+        // Label where the repeating function pair begins
+        $function_call_data[$start_row - 2]['repeating_function_label'] = '\n** REPEAT -- 1/2 Functions: '. (($length/2) + 1) .'x **';
+        $function_call_data[$start_row - 1]['repeating_function_label'] = '\n** REPEAT -- 2/2 Functions: '. (($length/2) + 1) .'x **';
+        $function_call_data[$start_row - 2]['repeating_function_count'] = ($length/2) + 1;
+        $function_call_data[$start_row - 1]['repeating_function_count'] = ($length/2) + 1;
+      }
+        
+      // Check to see if the previous row was a pair of triple repeating function calculate the length & use it as a cluster label
+      if ($function_call_data[$duplicate_row - 1]['function_repeat_number'] == 3 ) {
+        // If the total length of repeating double functions is not a multiple of three,
+        // then correct it by unmarking the previous row or two rows as a three_function_repeat 
+        // & deleting the remainder from the total length
+        $length = $duplicate_row - $start_row;
+        $remainder = ($length % 3);
+        if ($remainder == 1) {
+          $function_call_data[$duplicate_row - 1]['three_function_repeat'] = 0;
+          $function_call_data[$duplicate_row - 1]['function_repeat_number'] = 0;
+          $function_call_data[$duplicate_row - 1]['function_repeat'] = 0;
+          $length = $length - $remainder;
+        }
+        if ($remainder == 2) {
+          $function_call_data[$duplicate_row - 1]['three_function_repeat'] = 0;
+          $function_call_data[$duplicate_row - 1]['function_repeat_number'] = 0;
+          $function_call_data[$duplicate_row - 1]['function_repeat'] = 0;
+          $function_call_data[$duplicate_row - 2]['three_function_repeat'] = 0;
+          $function_call_data[$duplicate_row - 2]['function_repeat_number'] = 0;
+          $function_call_data[$duplicate_row - 2]['function_repeat'] = 0;
+          $length = $length - $remainder;
+        }
+        $function_call_data[($start_row - 3)]['repeating_function_label'] = '\n** REPEAT -- 1/3 Functions: '. (($length/3) + 1) .'x **';
+        $function_call_data[($start_row - 2)]['repeating_function_label'] = '\n** REPEAT -- 2/3 Functions: '. (($length/3) + 1) .'x **';
+        $function_call_data[($start_row - 1)]['repeating_function_label'] = '\n** REPEAT -- 3/3 Functions: '. (($length/3) + 1) .'x **';
+        $function_call_data[($start_row - 3)]['repeating_function_count'] = ($length/3) + 1;
+        $function_call_data[($start_row - 2)]['repeating_function_count'] = ($length/3) + 1;
+        $function_call_data[($start_row - 1)]['repeating_function_count'] = ($length/3) + 1;
+      }
+    }
+    $duplicate_row++;
+  }
+}
+
+/**
+ * This function fills out the following values:
+ * $lookup_table[$via_filename]["source_code_line_url"]
+ * $lookup_table[$via_filename]["node_color_hex"]
+ * $lookup_table["node_connection_color"][0:9]
+ */
+function visualize_backtrace_get_lookup_table_values($source_code_link_location) {
+  // The node connections are based upon the electrical color code coloring scheme: http://www.williamson-labs.com/images/res-color-code.gif
+  $lookup_table["node_connection_color"] = array("#000000", "#CD853F", "#FF0000", "#FFA500", "#FFD700", "#016450", "#0000FF", "#A020F0", "#858585", "#66C2A4");
+  // Set the node colors for the filenames here, and the Drupal 5.2 version numbers are also included here.
+  // Removed the following colors from the sites-all contribued moodules:
+  if ($source_code_link_location == "local") {
+    $lookup_table["cron.php"] = array("node_color_hex" => "#C7EAE5");
+    $lookup_table["includes/actions.inc"] = array("node_color_hex" => "#6BAED6");
+    $lookup_table["includes/batch.inc"] = array("node_color_hex" => "#6BAED6");
+    $lookup_table["includes/bootstrap.inc"] = array("node_color_hex" => "#6BAED6");
+    $lookup_table["includes/cache.inc"] = array("node_color_hex" => "#C6DBEF");
+    $lookup_table["includes/cache-install.inc"] = array("node_color_hex" => "#C6DBEF");
+    $lookup_table["includes/common.inc"] = array("node_color_hex" => "#B3CDE3");
+    $lookup_table["includes/database.inc"] = array("node_color_hex" => "#BEAED4");
+    $lookup_table["includes/database.mysql.inc"] = array("node_color_hex" => "#BEAED4");
+    $lookup_table["includes/database.mysql-common.inc"] = array("node_color_hex" => "#BEAED4");
+    $lookup_table["includes/database.mysqli.inc"] = array("node_color_hex" => "#BEAED4");
+    $lookup_table["includes/database.pgsql.inc"] = array("node_color_hex" => "#BEAED4");
+    $lookup_table["includes/file.inc"] = array("node_color_hex" => "#FDCDAC");
+    $lookup_table["includes/form.inc"] = array("node_color_hex" => "#00CD66");
+    $lookup_table["includes/image.gd.inc"] = array("node_color_hex" => "#FDCDAC");
+    $lookup_table["includes/image.inc"] = array("node_color_hex" => "#FDCDAC");
+    $lookup_table["includes/install.inc"] = array("node_color_hex" => "#DEEBF7");
+    $lookup_table["includes/install.mysql.inc"] = array("node_color_hex" => "#BEAED4");
+    $lookup_table["includes/install.mysqli.inc"] = array("node_color_hex" => "#BEAED4");
+    $lookup_table["includes/install.pgsql.inc"] = array("node_color_hex" => "#BEAED4");
+    $lookup_table["includes/language.inc"] = array("node_color_hex" => "#FDCDAC");
+    $lookup_table["includes/locale.inc"] = array("node_color_hex" => "#FDCDAC");
+    $lookup_table["includes/mail.inc"] = array("node_color_hex" => "#F46D43");
+    $lookup_table["includes/menu.inc"] = array("node_color_hex" => "#A1D99B");
+    $lookup_table["includes/module.inc"] = array("node_color_hex" => "#C7E9B4");
+    $lookup_table["includes/pager.inc"] = array("node_color_hex" => "#BEAED4");
+    $lookup_table["includes/path.inc"] = array("node_color_hex" => "#C7E9C0");
+    $lookup_table["includes/session.inc"] = array("node_color_hex" => "#DEEBF7");
+    $lookup_table["includes/tablesort.inc"] = array("node_color_hex" => "#FFC0CB");
+    $lookup_table["includes/theme.inc"] = array("node_color_hex" => "#FFC0CB");
+    $lookup_table["includes/unicode.inc"] = array("node_color_hex" => "#FDCDAC");
+    $lookup_table["includes/xmlrpc.inc"] = array("node_color_hex" => "#FDCDAC");
+    $lookup_table["includes/xmlrpcs.inc"] = array("node_color_hex" => "#FDCDAC");
+    $lookup_table["index.php"] = array("node_color_hex" => "#C7EAE5");
+    $lookup_table["install.php"] = array("node_color_hex" => "#C7EAE5");
+    $lookup_table["misc/maintenance.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/aggregator/aggregator.admin.inc"] = array("node_color_hex" => "#FCBBA1");
+    $lookup_table["modules/aggregator/aggregator.module"] = array("node_color_hex" => "#FCBBA1");
+    $lookup_table["modules/aggregator/aggregator.pages.inc"] = array("node_color_hex" => "#FCBBA1");
+    $lookup_table["modules/aggregator/aggregator-feed-source.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/aggregator/aggregator-item.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/aggregator/aggregator-summary-item.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/aggregator/aggregator-summary-items.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/aggregator/aggregator-wrapper.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/block/block.admin.inc"] = array("node_color_hex" => "#ABDDA4");
+    $lookup_table["modules/block/block.module"] = array("node_color_hex" => "#ABDDA4");
+    $lookup_table["modules/block/block-admin-display-form.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/blog/blog.module"] = array("node_color_hex" => "#F46D43");
+    $lookup_table["modules/blog/blog.pages.inc"] = array("node_color_hex" => "#F46D43");
+    $lookup_table["modules/blogapi/blogapi.module"] = array("node_color_hex" => "#F46D43");
+    $lookup_table["modules/book/book.admin.inc"] = array("node_color_hex" => "#EF6548");
+    $lookup_table["modules/book/book.module"] = array("node_color_hex" => "#EF6548");
+    $lookup_table["modules/book/book.pages.inc"] = array("node_color_hex" => "#EF6548");
+    $lookup_table["modules/color/color.module"] = array("node_color_hex" => "#FFC0CB");
+    $lookup_table["modules/comment/comment.module"] = array("node_color_hex" => "#FDBB84");
+    $lookup_table["modules/comment/comment.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/comment/comment-folded.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/comment/comment-wrapper.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/contact/contact.admin.inc"] = array("node_color_hex" => "#FFFFBF");
+    $lookup_table["modules/contact/contact.module"] = array("node_color_hex" => "#FFFFBF");
+    $lookup_table["modules/contact/contact.pages.inc"] = array("node_color_hex" => "#FFFFBF");
+    $lookup_table["modules/dblog/dblog.admin.inc"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/dblog/dblog.module"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/filter/filter.admin.inc"] = array("node_color_hex" => "#9EBCDA");
+    $lookup_table["modules/filter/filter.module"] = array("node_color_hex" => "#9EBCDA");
+    $lookup_table["modules/filter/filter.pages.inc"] = array("node_color_hex" => "#9EBCDA");
+    $lookup_table["modules/forum/forum.admin.inc"] = array("node_color_hex" => "#FDBF6F");
+    $lookup_table["modules/forum/forum.module"] = array("node_color_hex" => "#FDBF6F");
+    $lookup_table["modules/forum/forum.pages.inc"] = array("node_color_hex" => "#FDBF6F");
+    $lookup_table["modules/forum/forum-icon.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/forum/forum-list.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/forum/forums.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/forum/forum-submitted.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/forum/forum-topic-list.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/forum/forum-topic-navigation.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/help/help.admin.inc"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/help/help.module"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/locale/locale.module"] = array("node_color_hex" => "#FDCDAC");
+    $lookup_table["modules/menu/menu.admin.inc"] = array("node_color_hex" => "#A1D99B");
+    $lookup_table["modules/menu/menu.module"] = array("node_color_hex" => "#A1D99B");
+    $lookup_table["modules/node/content_types.inc"] = array("node_color_hex" => "#F16913");
+    $lookup_table["modules/node/node.admin.inc"] = array("node_color_hex" => "#F16913");
+    $lookup_table["modules/node/node.module"] = array("node_color_hex" => "#F16913");
+    $lookup_table["modules/node/node.pages.inc"] = array("node_color_hex" => "#F16913");
+    $lookup_table["modules/node/node.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/openid/openid.inc"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/openid/openid.module"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/openid/openid.pages.inc"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/openid/xrds.inc"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/path/path.admin.inc"] = array("node_color_hex" => "#C7E9C0");
+    $lookup_table["modules/path/path.module"] = array("node_color_hex" => "#C7E9C0");
+    $lookup_table["modules/php/php.module"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/ping/ping.module"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/poll/poll.module"] = array("node_color_hex" => "#EF6548");
+    $lookup_table["modules/poll/poll.pages.inc"] = array("node_color_hex" => "#EF6548");
+    $lookup_table["modules/poll/poll-bar.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/poll/poll-bar-block.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/poll/poll-results.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/poll/poll-results-block.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/poll/poll-vote.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/profile/profile.module"] = array("node_color_hex" => "#FFFFBF");
+    $lookup_table["modules/profile/profile-block.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/profile/profile-listing.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/profile/profile-wrapper.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/search/search.admin.inc"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/search/search.module"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/search/search.pages.inc"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/statistics/statistics.admin.inc"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/statistics/statistics.module"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/statistics/statistics.pages.inc"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/syslog/syslog.module"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/system/block.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/system/box.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/system/page.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/system/system.admin.inc"] = array("node_color_hex" => "#E0FFFF");
+    $lookup_table["modules/system/system.module"] = array("node_color_hex" => "#E0FFFF");
+    $lookup_table["modules/taxonomy/taxonomy.admin.inc"] = array("node_color_hex" => "#FC8D59");
+    $lookup_table["modules/taxonomy/taxonomy.module"] = array("node_color_hex" => "#FC8D59");
+    $lookup_table["modules/taxonomy/taxonomy.pages.inc"] = array("node_color_hex" => "#FC8D59");
+    $lookup_table["modules/throttle/throttle.admin.inc"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/throttle/throttle.module"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/tracker/tracker.module"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/tracker/tracker.pages.inc"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/translation/translation.module"] = array("node_color_hex" => "#FDCDAC");
+    $lookup_table["modules/translation/translation.pages.inc"] = array("node_color_hex" => "#FDCDAC");
+    $lookup_table["modules/trigger/trigger.module"] = array("node_color_hex" => "#6BAED6");
+    $lookup_table["modules/update/update.compare.inc"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/update/update.fetch.inc"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/update/update.module"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/update/update.report.inc"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/update/update.settings.inc"] = array("node_color_hex" => "#ABD9E9");
+    $lookup_table["modules/upload/upload.admin.inc"] = array("node_color_hex" => "#FDC086");
+    $lookup_table["modules/upload/upload.module"] = array("node_color_hex" => "#FDC086");
+    $lookup_table["modules/user/user.admin.inc"] = array("node_color_hex" => "#FFFFBF");
+    $lookup_table["modules/user/user.module"] = array("node_color_hex" => "#FFFFBF");
+    $lookup_table["modules/user/user.pages.inc"] = array("node_color_hex" => "#FFFFBF");
+    $lookup_table["modules/user/user-picture.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/user/user-profile.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/user/user-profile-category.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["modules/user/user-profile-item.tpl.php"] = array("node_color_hex" => "#F768A1");
+    $lookup_table["themes/bluemarine/block.tpl.php"] = array("node_color_hex" => "#FDE0EF");
+    $lookup_table["themes/bluemarine/box.tpl.php"] = array("node_color_hex" => "#FDE0EF");
+    $lookup_table["themes/bluemarine/comment.tpl.php"] = array("node_color_hex" => "#FDE0EF");
+    $lookup_table["themes/bluemarine/node.tpl.php"] = array("node_color_hex" => "#FDE0EF");
+    $lookup_table["themes/bluemarine/page.tpl.php"] = array("node_color_hex" => "#FDE0EF");
+    $lookup_table["themes/engines/phptemplate/phptemplate.engine"] = array("node_color_hex" => "#FF6EB4");
+    $lookup_table["themes/garland/block.tpl.php"] = array("node_color_hex" => "#FDE0EF");
+    $lookup_table["themes/garland/color/color.inc"] = array("node_color_hex" => "#FDE0EF");
+    $lookup_table["themes/garland/comment.tpl.php"] = array("node_color_hex" => "#FDE0EF");
+    $lookup_table["themes/garland/minnelli/color/color.inc"] = array("node_color_hex" => "#FDE0EF");
+    $lookup_table["themes/garland/node.tpl.php"] = array("node_color_hex" => "#FDE0EF");
+    $lookup_table["themes/garland/page.tpl.php"] = array("node_color_hex" => "#FDE0EF");
+    $lookup_table["themes/garland/template.php"] = array("node_color_hex" => "#FDE0EF");
+    $lookup_table["themes/pushbutton/block.tpl.php"] = array("node_color_hex" => "#FDE0EF");
+    $lookup_table["themes/pushbutton/box.tpl.php"] = array("node_color_hex" => "#FDE0EF");
+    $lookup_table["themes/pushbutton/comment.tpl.php"] = array("node_color_hex" => "#FDE0EF");
+    $lookup_table["themes/pushbutton/node.tpl.php"] = array("node_color_hex" => "#FDE0EF");
+    $lookup_table["themes/pushbutton/page.tpl.php"] = array("node_color_hex" => "#FDE0EF");
+    $lookup_table["update.php"] = array("node_color_hex" => "#C7EAE5");
+    $lookup_table["xmlrpc.php"] = array("node_color_hex" => "#FDCDAC");
+    $lookup_table["sites/default/settings.php"] = array("node_color_hex" => "#C7EAE5");
+  }
+  else if ($source_code_link_location == "drupal60_cvs") {
+    // A placeholder for the Drupal 6.0 CVS permalinks w/ updated version numbers
+    null;
+  }
+ 
+  return $lookup_table;
+}
+
+/**
+ * Determine the XDebug trace file path by parsing the result of the
+ * xdebug_get_tracefile_name() function
+ */
+function visualize_backtrace_get_xdebug_tracefile_path() {
+  // The trace number and trace path can be found w/ the xdebug_get_tracefile_name() command
+  // usually something like "/tmp/trace.1189698885.xt"
+  // Recreate the trace file path and then include open trace file of interest
+  $trace_path_array = explode("/", xdebug_get_tracefile_name());
+
+  // The 0 index of the $trace_path_array is a null because the trace path
+  // usually starts with the delimiter of "/"
+  // So subtract 1 to find out where the trace.##########.xt value is located
+  $trace_number_arg_number = count($trace_path_array)-1;
+
+  $trace_file = "/";
+  $i = 1;
+  while ($i < $trace_number_arg_number) {
+    $trace_file .= $trace_path_array[$i] ."/";
+    $i++;
+  }
+  return $trace_file;
+}
+  
+
+/**
+ * Menu_Callback to display the latest XDebug traces
+ */
+function visualize_backtrace_display_latest_traces() {
+  $trace_path = visualize_backtrace_get_xdebug_tracefile_path();  
+
+  // First retrieve the trace values that have already been parsed
+  $get_parsed_trace_files_command = "ls ". $trace_path ."trace.*.xtparsed";
+  exec($get_parsed_trace_files_command, $parsed_trace_files_output);
+
+  // Set a flag for each trace_number that have been already parsed.
+  foreach ($parsed_trace_files_output as $parse_trace_value) {
+    $parsed_trace_number = explode('.', $parse_trace_value);
+    $parsed_trace_flag[$parsed_trace_number[1]] = TRUE;
+  }
+
+  // Now retrieve all of the XDebug traces that have been created
+  $get_trace_files_command = "ls ". $trace_path ."trace.*.xt";
+  exec($get_trace_files_command, $trace_files_output);
+
+  $output = '';
+
+  // Reverse the order to show the most recent trace files first
+  krsort($trace_files_output);
+  foreach ($trace_files_output as $trace_value) {
+    $trace_number = explode('.', $trace_value);
+    $trace_number[1];
+    if ($parsed_trace_flag[$trace_number[1]]) {
+      $parsed = ' * has already been parsed';
+    }
+    else {
+      $parsed = '';
+    }
+    $output .= l($trace_value, 'visualize_backtrace/'. $trace_number[1] .'/hide_callstack/all_sections') . $parsed .'<br />';
+  }
+  
+  return $output;
+}
+
+/**
+ * Menu_callback to test whether or not XDebug is correctly creating a tracefile
+ */
+function visualize_backtrace_test_xdebug() {
+  
+  if (xdebug_get_tracefile_name()) {
+    $output = 'XDebug is properly creating trace files located at: '. xdebug_get_tracefile_name() .'<br />';
+    $output .= '';
+  }
+  else {
+    $output = 'XDebug is not properly creating trace files yet. Check the INSTALL.txt for more debugging information.';
+  }
+  return $output;
+}
+
+/**
+ * Menu_callback to show the color codes for the tracefile function filenames
+ */
+function visualize_backtrace_color_codes() {
+  $output .= '
+    <table>
+    <tr><td><strong>Core Functions</strong></td><td><strong>Site Building Functions</strong></td><td><strong>Content Management Functions</strong></td></tr>
+    <tr><td bgcolor="#6BAED6">includes/bootstrap.inc</td><td bgcolor="#A1D99B">modules/menu/menu.module</td><td bgcolor="#F16913">modules/node/node.module</td></tr>
+    <tr><td bgcolor="#9EBCDA">modules/filter/filter.module</td><td bgcolor="#A1D99B">includes/menu.inc</td><td bgcolor="#F16913">modules/node/node.admin.inc</td></tr>
+    <tr><td bgcolor="#9EBCDA">modules/filter/filter.admin.inc</td><td bgcolor="#A1D99B">modules/menu/menu.admin.inc</td><td bgcolor="#F16913">modules/node/node.pages.inc</td></tr>
+    <tr><td bgcolor="#9EBCDA">modules/filter/filter.pages.inc</td><td bgcolor="#ABDDA4">modules/block/block.module</td><td bgcolor="#F16913">modules/node/content_types.inc</td></tr>
+    <tr><td bgcolor="#B3CDE3">includes/common.inc</td><td bgcolor="#ABDDA4">modules/block/block.admin.inc</td><td bgcolor="#F46D43">modules/blogapi/blogapi.module</td></tr>
+    <tr><td bgcolor="#C6DBEF">includes/cache.inc</td><td bgcolor="#C7E9C0">modules/path/path.module</td><td bgcolor="#EF6548">modules/book/book.module</td></tr>
+    <tr><td bgcolor="#C6DBEF">includes/cache-install.inc</td><td bgcolor="#C7E9C0">includes/path.inc</td><td bgcolor="#EF6548">modules/book/book.admin.inc</td></tr>
+    <tr><td bgcolor="#C6DBEF">includes/actions.inc</td><td bgcolor="#C7E9C0">modules/path/path.admin.inc</td><td bgcolor="#EF6548">modules/book/book.pages.inc</td></tr>
+    <tr><td bgcolor="#C6DBEF">includes/batch.inc</td><td bgcolor="#C7E9B4">includes/module.inc</td><td bgcolor="#F46D43">modules/blog/blog.module</td></tr>
+    <tr><td bgcolor="#DEEBF7">includes/install.inc</td></td><td><td bgcolor="#F46D43">modules/blog/blog.pages.inc</td></tr>
+    <tr><td bgcolor="#DEEBF7">includes/session.inc</td><td><strong>Database Functions</strong></td><td bgcolor="#F46D43">includes/mail.inc</td></tr>
+    <tr><td bgcolor="#E0FFFF">modules/system/system.module</td><td bgcolor="#BEAED4">includes/database.inc</td><td bgcolor="#EF6548">modules/poll/poll.module</td></tr>
+    <tr><td bgcolor="#E0FFFF">modules/system/system.admin.inc</td><td bgcolor="#BEAED4">includes/database.mysql.inc</td><td bgcolor="#EF6548">modules/poll/poll.pages.inc</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/help/help.module</td><td bgcolor="#BEAED4">includes/database.mysqli.inc</td><td bgcolor="#FC8D59">modules/taxonomy/taxonomy.module</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/help/help.admin.inc</td><td bgcolor="#BEAED4">includes/database.pgsql.inc</td><td bgcolor="#FC8D59">modules/taxonomy/taxonomy.admin.inc</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/ping/ping.module</td><td bgcolor="#BEAED4">includes/install.mysql.inc</td><td bgcolor="#FC8D59">modules/taxonomy/taxonomy.pages.inc</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/search/search.module</td><td bgcolor="#BEAED4">includes/install.mysqli.inc</td><td bgcolor="#FDBF6F">modules/forum/forum.module</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/search/search.admin.inc</td><td bgcolor="#BEAED4">includes/install.pgsql.inc</td><td bgcolor="#FDBF6F">modules/forum/forum.admin.inc</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/search/search.pages.inc</td><td bgcolor="#BEAED4">includes/pager.inc</td><td bgcolor="#FDBF6F">modules/forum/forum.pages.inc</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/statistics/statistics.module</td><td bgcolor="#BEAED4">includes/database.mysql-common.inc</td><td bgcolor="#FDBB84">modules/comment/comment.module</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/statistics/statistics.admin.inc</td></td><td><td bgcolor="#FDC086">modules/upload/upload.module</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/statistics/statistics.pages.inc</td><td><strong>User Management Functions</strong></td><td bgcolor="#FDC086">modules/upload/upload.admin.inc</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/throttle/throttle.module</td><td bgcolor="#FFFFBF">modules/contact/contact.module</td><td bgcolor="#FCBBA1">modules/aggregator/aggregator.module</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/throttle/throttle.admin.inc</td><td bgcolor="#FFFFBF">modules/contact/contact.admin.inc</td><td bgcolor="#FCBBA1">modules/aggregator/aggregator.admin.inc</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/tracker/tracker.module</td><td bgcolor="#FFFFBF">modules/contact/contact.pages.inc</td><td bgcolor="#FCBBA1">modules/aggregator/aggregator.pages.inc</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/tracker/tracker.pages.inc</td><td bgcolor="#FFFFBF">modules/profile/profile.module</td><td bgcolor="#FDCDAC">includes/unicode.inc</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/dblog/dblog.admin.inc</td><td bgcolor="#FFFFBF">modules/user/user.module</td><td bgcolor="#FDCDAC">modules/locale/locale.module</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/dblog/dblog.module</td><td bgcolor="#FFFFBF">modules/user/user.admin.inc</td><td bgcolor="#FDCDAC">includes/xmlrpc.inc</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/openid/openid.inc</td><td bgcolor="#FFFFBF">modules/user/user.pages.inc</td><td bgcolor="#FDCDAC">includes/xmlrpcs.inc</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/openid/openid.module</td></td><td><td bgcolor="#FDCDAC">includes/locale.inc</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/openid/openid.pages.inc</td></td><td><td bgcolor="#FDCDAC">includes/file.inc</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/openid/xrds.inc</td></td><td><td bgcolor="#FDCDAC">includes/image.inc</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/php/php.module</td></td><td><td bgcolor="#FDCDAC">includes/image.gd.inc</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/syslog/syslog.module</td></td><td><td bgcolor="#FDCDAC">xmlrpc.php</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/trigger/trigger.module</td></td><td><td bgcolor="#FDCDAC">includes/language.inc</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/update/update.compare.inc</td></td><td><td bgcolor="#FDCDAC">modules/translation/translation.module</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/update/update.fetch.inc</td></td><td><td bgcolor="#FDCDAC">modules/translation/translation.pages.inc</td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/update/update.module</td></td><td></td><td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/update/update.report.inc</td></td><td></td><td></tr>
+    <tr><td bgcolor="#ABD9E9">modules/update/update.settings.inc</td></td><td></td><td></tr>
+    <tr><td bgcolor="#C7EAE5">index.php</td></td><td></td><td></tr>
+    <tr><td bgcolor="#C7EAE5">cron.php</td></td><td></td><td></tr>
+    <tr><td bgcolor="#C7EAE5">install.php</td></td><td></td><td></tr>
+    <tr><td bgcolor="#C7EAE5">sites/default/settings.php</td></td><td></td><td></tr>
+    <tr><td bgcolor="#C7EAE5">update.php</td></td><td></td><td></tr>
+    <tr><td bgcolor="#00CD66">includes/form.inc</td></td><td></td><td></tr>
+    </table><table>
+    <table>
+    <tr><td><strong>Theming Functions</strong></td><td></td><td></td><tr>
+    <tr><td bgcolor="#FF82AB">themes/engines/phptemplate/phptemplate.engine</td><td bgcolor="#FFC0CB">includes/tablesort.inc</td><td bgcolor="#FDE0EF">modules/forum/forum-topic-navigation.tpl.php</td></tr>
+    <tr><td bgcolor="#FDE0EF">themes/bluemarine/block.tpl.php</td><td bgcolor="#FFC0CB">includes/theme.inc</td><td bgcolor="#FDE0EF">modules/node/node.tpl.php</td></tr>
+    <tr><td bgcolor="#FDE0EF">themes/bluemarine/box.tpl.php</td><td bgcolor="#FFC0CB">modules/color/color.module</td><td bgcolor="#FDE0EF">modules/poll/poll-bar.tpl.php</td></tr>
+    <tr><td bgcolor="#FDE0EF">themes/bluemarine/page.tpl.php</td><td bgcolor="#FDE0EF">misc/maintenance.tpl.php</td><td bgcolor="#FDE0EF">modules/poll/poll-bar-block.tpl.php</td></tr>
+    <tr><td bgcolor="#FDE0EF">themes/bluemarine/node.tpl.php</td><td bgcolor="#FDE0EF">modules/aggregator/aggregator-feed-source.tpl.php</td><td bgcolor="#FDE0EF">modules/poll/poll-results.tpl.php</td></tr>
+    <tr><td bgcolor="#FDE0EF">themes/bluemarine/comment.tpl.php</td><td bgcolor="#FDE0EF">modules/aggregator/aggregator-item.tpl.php</td><td bgcolor="#FDE0EF">modules/poll/poll-results-block.tpl.php</td></tr>
+    <tr><td bgcolor="#FDE0EF">themes/garland/comment.tpl.php</td><td bgcolor="#FDE0EF">modules/aggregator/aggregator-summary-item.tpl.php</td><td bgcolor="#FDE0EF">modules/poll/poll-vote.tpl.php</td></tr>
+    <tr><td bgcolor="#FDE0EF">themes/garland/color/color.inc</td><td bgcolor="#FDE0EF">modules/aggregator/aggregator-summary-items.tpl.php</td><td bgcolor="#FDE0EF">modules/profile/profile-block.tpl.php</td></tr>
+    <tr><td bgcolor="#FDE0EF">themes/garland/block.tpl.php</td><td bgcolor="#FDE0EF">modules/aggregator/aggregator-wrapper.tpl.php</td><td bgcolor="#FDE0EF">modules/profile/profile-listing.tpl.php</td></tr>
+    <tr><td bgcolor="#FDE0EF">themes/garland/node.tpl.php</td><td bgcolor="#FDE0EF">modules/block/block-admin-display-form.tpl.php</td><td bgcolor="#FDE0EF">modules/profile/profile-wrapper.tpl.php</td></tr>
+    <tr><td bgcolor="#FDE0EF">themes/garland/page.tpl.php</td><td bgcolor="#FDE0EF">modules/comment/comment.tpl.php</td><td bgcolor="#FDE0EF">modules/system/block.tpl.php</td></tr>
+    <tr><td bgcolor="#FDE0EF">themes/garland/template.php</td><td bgcolor="#FDE0EF">modules/comment/comment-folded.tpl.php</td><td bgcolor="#FDE0EF">modules/system/box.tpl.php</td></tr>
+    <tr><td bgcolor="#FDE0EF">themes/garland/minnelli/color/color.inc</td><td bgcolor="#FDE0EF">modules/comment/comment-wrapper.tpl.php</td><td bgcolor="#FDE0EF">modules/system/page.tpl.php</td></tr>
+    <tr><td bgcolor="#FDE0EF">themes/pushbutton/block.tpl.php</td><td bgcolor="#FDE0EF">modules/forum/forum-icon.tpl.php</td><td bgcolor="#FDE0EF">modules/user/user-picture.tpl.php</td></tr>
+    <tr><td bgcolor="#FDE0EF">themes/pushbutton/box.tpl.php</td><td bgcolor="#FDE0EF">modules/forum/forum-list.tpl.php</td><td bgcolor="#FDE0EF">modules/user/user-profile.tpl.php</td></tr>
+    <tr><td bgcolor="#FDE0EF">themes/pushbutton/comment.tpl.php</td><td bgcolor="#FDE0EF">modules/forum/forums.tpl.php</td><td bgcolor="#FDE0EF">modules/user/user-profile-category.tpl.php</td></tr>
+    <tr><td bgcolor="#FDE0EF">themes/pushbutton/node.tpl.php</td><td bgcolor="#FDE0EF">modules/forum/forum-submitted.tpl.php</td><td bgcolor="#FDE0EF">modules/user/user-profile-item.tpl.php</td></tr>
+    <tr><td bgcolor="#FDE0EF">themes/pushbutton/page.tpl.php</td><td bgcolor="#FDE0EF">modules/forum/forum-topic-list.tpl.php</td><td></td></tr>
+    </table>
+    ';
+  return $output;
+}

@@ -1,0 +1,33 @@
+<?php
+
+function dummy_menu_disabled() {
+  $item = menu_get_item('node/1');
+  var_dump($item);
+}
+
+function mu() {
+  return  _mu() . ' Mb';
+}
+
+function _mu() {
+  return round((xdebug_memory_usage() / 1048576), 3);
+}
+
+function mpu() {
+  return  _mpu() . ' Mb';
+}
+
+function _mpu() {
+  return round((xdebug_peak_memory_usage() / 1048576), 3);
+}
+
+function mudelt() {
+  static $mem = 0;
+  $cur_mem = _mu();
+  $diff = ((float) $cur_mem - $mem);
+  $output = "\nLast Call Mem Usage: $mem Mb\n";
+  $output .= "This Call Mem Usage: $cur_mem Mb\n";
+  $output .= "Delta: $diff Mb\n";
+  $mem = $cur_mem;
+  var_dump($output);
+}

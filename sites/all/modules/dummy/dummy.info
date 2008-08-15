@@ -1,0 +1,3 @@
+name = D6 Dummy Module
+description = Just a blank namespace for easy testing purposes.
+core = 6.x

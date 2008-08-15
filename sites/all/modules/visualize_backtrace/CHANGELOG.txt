@@ -1,0 +1,4 @@
+1. October 2007
+-----------------
+visualize_backtrace.module
+- initial commit of visualize_backtrace.module

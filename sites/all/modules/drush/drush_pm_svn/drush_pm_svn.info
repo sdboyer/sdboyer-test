@@ -1,0 +1,9 @@
+; $Id: drush_pm_svn.info,v 1.1 2008/05/19 01:31:57 weitzman Exp $
+name = Drush package manager SVN support
+description = Allows drush to manage a site sandbox using SVN.
+package = drush
+core = 6.x
+dependencies[] = update
+dependencies[] = drush 
+dependencies[] = drush_pm
+

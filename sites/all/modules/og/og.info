@@ -1,0 +1,5 @@
+name = Organic groups
+description = "Enable users to create and manage their own 'groups'"
+package = "Organic groups"
+dependencies[] = views
+core = 6.x

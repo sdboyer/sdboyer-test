@@ -1,0 +1,6 @@
+; $Id: drush_tools.info,v 1.5 2008/05/17 03:52:33 weitzman Exp $
+name = Drush toolbox
+description = Provides several tools that are aimed at site administrators and developers.
+package = drush
+dependencies[] = drush
+core = 6.x

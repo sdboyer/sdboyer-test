@@ -1,0 +1,296 @@
+Installation
+------------
+
+/** 
+ * REQUIREMENTS
+/* 
+
+You will need to install XDebug in order for this module to work correctly.
+The installation instructions from XDebug are in Section 2.0.
+There are some changes that need to be made to your .htaccess and php.ini file, 
+which are detailed in Section 2.1 and Section 2.3.
+Sections 2.2 & 2.4 lists some checks to verify that you've correctly
+installed Xdebug.
+
+If you'd like to dynamically view the GraphViz generated flowcharts, then
+I recommend to installing the ZGRViewer from the command line (Section 3.0)
+and optionally change some apache permissions (Section 4.0).  
+
+Some additional debugging references are listed in Section 5.0 in case you run
+into any trouble along the way.
+
+NOTE: These instructions are Mac OS X specific, but it should be possible to get
+working on Windows or Linux as well.
+
+
+/** 
+ * Section 1.0
+ * Install & enable the visualize_backtrace.module
+/* 
+  1. DOWNLOAD AND INSTALL VISUALIZE BACKTRACE MODULE
+    Visualize Backtrace can be found at
+    http://drupal.org/project/visualize_backtrace/.
+
+  2. ENABLE THE VISUALIZE BACKTRACE MODULE
+    Unpack the module in your site's module directory. Then browse to 
+    "administer" -> "site building" -> "modules" OR "admin/build/modules"
+    and enable the Visualize Backtrace module.
+   
+  3. CONFIGURE VISUALIZE BACKTRACE MODULE PERMISSIONS
+    Browse to "administer" -> "user management" -> "access control" OR 
+    "admin/user/access" & set permissions for "administer visualize backtrace."
+
+  WARNING: Do not enable the 'View Backtrace Graphs' until XDebug is confirmed
+  to be set up properly -- otherwise you risk getting a White Screen of Death.
+  More set-up instructions are in the sections down below.
+
+/** 
+ * Section 2.0
+ * Installing XDebug 2.0
+/* 
+
+Download XDebug from http://xdebug.org/
+Down below are the full installation instructions copied from XDebug's README
+More XDebug installation references can be found in Section 5.0 at the bottom
+
+  Crib Note Summary: 
+  Here are the actual commands that I used after copying the downloaded 
+  xdebug-2.0.0 folder to /usr/local/bin
+  3. $ phpize;
+  4. $ ./configure --enable-xdebug --with-php-config=/usr/bin/php-config;
+  5. $ make;
+  6. $ cp /usr/local/bin/xdebug-2.0.0/xdebug-2.0.0/modules/xdebug.so /Users/kent/komodo/extensions;
+  7. Find and Open your default php.ini file -- if you're not sure, then 
+  browse to "admin/logs/status/php" and look at the "Configuration File (php.ini) 
+  Path" value.
+  Add "zend_extension=/Users/kent/komodo/extensions/xdebug.so" to php.ini;
+  8. RESTART
+
+INSTRUCTIONS FROM XDEBUG's README:1. Unpack the tarball: tar -xzf xdebug-2.x.x.tgz.  Note that you donot need to unpack the tarball inside the PHP source code tree.Xdebug is compiled separately, all by itself, as stated above.2. cd xdebug-2.x.x3. Run phpize: phpize   (or /path/to/phpize if phpize is not in your path).4. ./configure --enable-xdebug (or: ../configure --enable-xdebug   --with-php-config=/path/to/php-config if php-config is not in your   path)5. Run: make6. cp modules/xdebug.so /to/wherever/you/want/it7. add the following line to php.ini:   zend_extension="/wherever/you/put/it/xdebug.so"8. Restart your webserver.9. Write a PHP page that calls "phpinfo();" Load it in a browser and   look for the info on the xdebug module.  If you see it, you have been   successful!  
+   DRUPAL-SPECIFIC NOTE: You can create a page node w/ a PHP filter and
+   enter in <?php phpinfo() ?> for the full display -- or browse to
+  "admin/logs/status/php" and search for an XDebug copyright notice.
+
+
+/** 
+ * Section 2.1
+ * Change the PHP.ini
+/*
+As described in step #7 above, be sure that
+"zend_extension=/usr/local/xdebug/xdebug.so" has been added to your php.ini file
+-- which on my computer is located at /usr/local/php5/lib/php.ini.  If you have
+MAMP set up, then it might be at "/mamp pro/(mamp pro).app/resources/php.ini"
+
+You may find that there are multiple php.ini files, and it may be easiest to try
+adding the xdebug.so location information to all of them.
+
+
+/** 
+ * Section 2.2
+ * Verify that XDebug correctly installed
+/*
+Go to /admin/logs/status/php to verify & search for XDebug to verify that it
+has been correctly installed.
+
+NOTE: You may have difficulties successfully compiling the xdebug.so file, 
+in which case you may want to try downloading & using this compiled file 
+http://www.kentbye.com/files/xdebug.so -- which is the release candidate 3 
+version of XDebug 2.0.0.
+
+
+/** 
+ * Section 2.3
+ * Add lines to your .htaccess file to generate XDebug trace logs
+/*
+
+The XDebug traces should have auto_trace turned on, trace_format of 1,
+and the trace_output_name should be the timestamp.
+
+To set all of this up, then open up your .htaccess file (which will most likely
+be hidden & opening tips are down below).  Add in the following lines:
+
+# via http://www.sitepoint.com/blogs/2007/04/23/faster-php-apps-profile-your-code-with-xdebug/
+php_value xdebug.profiler_output_dir /tmp
+php_value xdebug.profiler_output_name timestamp
+php_value xdebug.profiler_enable 1
+php_value xdebug.auto_trace 1
+php_value xdebug.trace_format 1
+php_value xdebug.trace_output_name timestamp
+
+** NOTE: For XDebug 2.0, the "timestamp" may need to be changed to "trace.%t" to
+get the trace files into the format of /tmp/trace.1191258238.xt --
+(i.e. where the trace file number is equal to the timestamp of the page load)
+
+** TIP: If you are not familiar with finding and opening hidden files,
+then one way to do it is to open up the terminal and change directories 
+to the drupal installation file path & enter the following:
+$ open -a /Applications/TextEdit.app .htaccess
+
+
+/** 
+ * Section 2.4
+ * Verify that XDebug is correctly generating trace logs
+/*
+After enabling the visualize_backtrace.module & user access permissions in
+Section 1.0, then go to the path "/test_xdebug" to test whether or not the
+trace files are correctly being generated.
+
+If it is not set up correctly, then you will see this:
+"XDebug is not properly creating trace files yet. Check the INSTALL.txt
+for more debugging information.';"
+
+This debugging information can be found in the reference Section 5.0 down below.
+
+If it is set up correctly, then you will see this:
+"XDebug is properly creating trace files located at: /tmp/trace.1192237296.xt"
+
+And when you open up the trace file, then you should see something like this:
+Version: 2.0.0RC3
+TRACE START [2007-10-13 01:01:36]
+1	0	0	0.000681	57384	{main}	1		/Library/WebServer/Documents/d52/index.php	0
+2	1	0	0.005755	259384	require_once	1	/Library/WebServer/Documents/d52/includes/bootstrap.inc	/Library/WebServer/Documents/d52/index.php	12
+3	2	0	0.005795	259844	define	0		/Library/WebServer/Documents/d52/includes/bootstrap.inc	13
+3	2	1	0.005827	259844
+3	3	0	0.005842	259844	define	0		/Library/WebServer/Documents/d52/includes/bootstrap.inc	18
+
+...
+
+3	2899	0	0.364787	9936352	variable_get	1		/Library/WebServer/Documents/d52/sites/all/modules/devel/devel.module	405
+3	2899	1	0.364820	9936352
+2	2898	1	0.364847	9935244
+1	2880	1	0.364884	9933716
+    0.3790      41492
+TRACE END   [2007-10-13 01:01:37]
+
+TIP: You can quickly open the trace files with the following terminal command:
+$ open -a /Applications/TextEdit.app /tmp/trace.11922XXXXX.xt
+
+/** 
+ * Section 2.5
+ * Enable the 'Visualize Backtrace' block
+/*
+After verifying that the trace logs are being generated in the correct format,
+then you can now enable the 'Visualize Backtrace' block at the path
+"/admin/build/block"
+
+This is the easiest & quickest way to generate backtrace graphs for a given
+page load. 
+
+You can also start to view all of the past trace files at the path
+"/view_traces"
+
+/** 
+ * Section 3.0
+ * Install ZGRViewer to view the *.dot flowcharts
+/*
+The ZGRViewer is by far the best way to view the huge *.dot flowcharts that are
+generated.  It can be a little tricky to set up, but here are the steps that I
+took to get it up and running.
+
+1.) Download ZGRViewer from http://zvtm.sourceforge.net/zgrviewer.html#download
+Or go directly to http://sourceforge.net/project/showfiles.php?group_id=63244
+And download the latest version of zgrviewer (release 0.7.2a as of 10/12/07)
+
+2.) Unzip the zgrviewer-0_7_2a.zip package and copy the "zgrviewer" folder to
+/usr/local/bin/zgrviewer.  If you drag and drop it using the Finder, then you'll
+have to authenticate the move.  You can alternatively save it in your preferred
+location for unix programs.
+
+3.) OPTIONAL: If you want to be able to launch the ZGRViewer directly from
+Drupal, then you need to be sure that all of the you have the proper owner and
+group permissions of all of the zgrviewer files.
+
+ - Open the terminal.
+   $ cd /usr/local/bin/zgrviewer
+
+ - Double check your username
+   $ whoami
+
+ - Check to see that the owner and group is under your username,
+   and not "root" or "wheel"
+   $ ls -l
+
+ - If it isn't under your name, then change the permissions on all of the files
+   $ sudo chown your_username:your_username *.*
+
+4.) The ZGRViewer requires some library information from GraphViz. Download
+the GraphViz Mac client viewer from http://www.pixelglow.com/graphviz/ and
+install into your Applications folder.   Or alternatively you can download the
+unix source code from http://www.graphviz.org/Download.php (after scrolling to
+the bottom and agreeing to the license)
+5.)  To run ZGRViewer for the first time, then open up a terminal window and     $ cd /usr/local/bin/zgrviewer     $ ./run.sh
+     
+6.) Go to SETUP: View -> Preferences -> Directories  Enter in the following information (be sure to replace "kent" with
+  your own username)
+
+  Temporary Directory=
+  /tmp  
+  DOT files directory =
+  /Users/kent/Documents/GraphViz  
+  GraphViz/dot executable =
+  /Applications/Graphviz.app/Contents/MacOS/dot  
+  GraphViz/neato executable =
+  /Applications/Graphviz.app/Contents/MacOS/neato  
+  GraphViz/circo executable =
+  /Applications/Graphviz.app/Contents/MacOS/circo  
+  GraphViz/twopi executable =
+  /Applications/Graphviz.app/Contents/MacOS/twopi  
+  GraphViz font directory (optional) =
+  /library/fonts
+
+7.) In order to view ZGRViewer HREF links from a rendered *.dot file, then you
+    must go to     View -> Preferences -> Web Browser     Specify Browser with the following Command Line Options --
+     enter "open -a /Applications/Safari.app" to use Safari or
+     "open -a /Applications/Firefox.app" to use Firefox     Do a File -> Reload to initialize the settings     Highlight Node by hovering over a mouse & Hit either the 'L' key
+     or the Space Bar  Note: In order to execute the following CLI command with shell_exec() from
+  Drupal, then you may have to change some apache httpd.conf permissions as
+  detailed in Section 4.0.  If you are not comfortable with giving Drupal your user's UNIX permissions,
+  then copy & paste the generated command line interface commands directly
+  into the terminal  (i.e. /usr/local/bin/zgrviewer/run.sh --Pdot /Library/WebServer/Documents/d52/files/1191949882_section1.dot; )/** 
+ * Section 4.0
+ * Change some Apache permission settings
+/*
+
+If you want to automatically launch the ZGRViewer from Drupal, then you have to
+change a permission in the httpd.conf file that can be found at
+/etc/httpd/httpd.conf  CHANGE FROM    User www    Group www
+
+  CHANGE TO    User your_username    Group your_username  Do a $ whoami in a terminal window to determine your_username if you don't
+  know it  NOTE: This is probably not the ideal solution due to security concerns (i.e.
+  Drupal command-line interface commands could execute UNIX commands with
+  whatever permissions your username has). But you should be safe if you are
+  running it locally on your computer, and if you're sure to double check all the
+  CLI commands that will be running from shell_exec() in the future.  For more discussion on this see here:
+  http://us3.php.net/manual/en/function.shell-exec.php#37971  As well as here: http://www.webhostingtalk.com/archive/index.php/t-386461.html
+
+/** 
+ * Section 5.0
+ * References
+/*
+Below is a brief summary of some XDebug references that I used to get it up and
+running.  The latest updated version is here: http://del.icio.us/kentbye/xdebug* * * *Xdebug .htaccess Settings to enable complete function call traces within PHP/Drupalhttp://xdebug.org/docs/all_settings#trace_formatAdd this to .htaccess file: php_value xdebug.profiler_output_dir /tmp
+* php_value xdebug.profiler_output_name timestamp
+* php_value xdebug.profiler_enable 1
+* php_value xdebug.auto_trace 1
+* php_value xdebug.trace_format 1* * * *Remote PHP Debugging on Intel-based Macs with Komodo IDE | SysArchitectshttp://www.sysarchitects.com/node/22Finally got this to work w/ custom compiled xdebug.so placed in
+/Users/kent/komodo/extensions & Wizard created php.ini in /Users/kent/komodo/ini
+(/usr/local/php5/lib/php.ini) & typing "?XDEBUG_SESSION_START=1" into firefox
+URL. Very painful to get working* * * *Xdebug - Debugger and Profiler Tool for PHP
+[via http://www.sysarchitects.com/node/22] --
+Place in /usr/local/php5/lib/php/extensions/no-debug-non-zts-20060613http://xdebug.org/phpize;
+./configure --enable-xdebug --with-php-config=/usr/bin/php-config;
+make;
+cp /usr/local/bin/xdebug-2.0.0/xdebug-2.0.0/modules/xdebug.so /Users/kent/komodo/extensions;
+Add "zend_extension=/Users/kent/komodo/extensions/xdebug.so" to php.ini;
+RESTART* * * *Squash bugs in PHP applications with Xdebughttp://www.ibm.com/developerworks/library/os-php-xdebug/index.htmlA relatively new article on XDebug from IBM (8/7/07)* * * *Xdebug Development List: By Datehttp://xdebug.org/archives/xdebug-dev/date.htmlXDebug development e-mail list* * * *Xdebug Trace_Format Output Column numbershttp://xdebug.org/docs/execution_trace#trace_formatXDebug trace output $1 = level, $2 = function_number, $3 = always_zero,
+$4 = time_index, $5 = memory, $6 = function_name,$7 = defined_function,
+$8 = via_filename,
+if ($10 exists) then {
+  $9 = included_file; $10 = line_number;
+} else {
+$9 = line_number}
+
+More GraphViz references can be found here: http://del.icio.us/kentbye/graphviz
+
+
+// $Id: INSTALL.txt,v 1.1.2.1 2007/10/23 21:22:07 kentbye Exp $
