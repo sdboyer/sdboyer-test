@@ -1,0 +1,33 @@
+<?php
+
+function remote_keyword_filter_filter($op, $delta, $format, $text) {
+  switch ($op) {
+    case 'list':
+      return t('Remote Keyword jQuery tooltip');
+/*      array(
+        0 => t('Remote Keyword Popup filter'),
+        1 => t('Remote Keyword jQuery filter'),
+      );*/
+    case 'description':
+      return t('Dynamically adds jQuery tooltip-style popup links to words from the matching remote keyword database.');
+/*      array(
+        0 => t('Dynamically adds Advanced Help links to words from the matching remote keyword database.'),
+        1 => t('Dynamically adds jQuery tooltip-style popup links to words from the matching remote keyword database.'),
+      );*/
+    // case 'prepare':
+      
+    case 'process':
+      $keywords = remote_keyword_filter_get_keywords_placeholder();
+      $ids      = array_keys($keywords);
+      $values   = array_values($keywords);
+      $text = preg_replace($ids, $values, $text);
+    case 'settings':
+      
+    default:
+      return $text;
+  }
+}
+
+function remote_keyword_filter_get_keywords_placeholder() {
+  return array('test' => 'testhasbeenfiltered');
+}

@@ -1,0 +1,4 @@
+; $Id: advanced_help.info,v 1.2 2008/04/19 16:45:57 merlinofchaos Exp $
+name = Remote Keyword Filter
+description = Provides an input filter for Advanced Help to render using Remote Keywords.
+core = 6.x

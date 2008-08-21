@@ -1,0 +1,54 @@
+/* $Id: help.css,v 1.5 2008/05/30 18:55:44 merlinofchaos Exp $ */
+
+.advanced-help-topic code, .advanced-help-topic pre {
+  border: 1px solid #444;
+  background: #f1f1f1;
+  margin: 1em;
+  padding: .2em;
+  display: block;
+}
+
+.help-left {
+  text-align: left;
+  width: 42%;
+  display: block;
+  float: left; /* LTR */
+}
+
+.help-up {
+  margin: 0 5%;
+  width: 4%;
+  display: block;
+  float: left; /* LTR */
+}
+
+.help-up-noleft {
+  margin: 0 5%;
+  width: 42%;
+  text-align: right;
+  display: block;
+  float: left; /* LTR */
+}
+
+.help-right {
+  text-align: right;
+  width: 42%;
+  display: block;
+  float: right;
+}
+
+.help-box {
+  margin: .5em;
+}
+
+.help-navigation {
+  border-top: 1px dotted #ccc;
+}
+
+.help-previous {
+  float: left;
+}
+
+.help-next {
+  float: right;
+}
