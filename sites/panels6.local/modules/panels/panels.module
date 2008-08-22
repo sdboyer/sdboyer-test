@@ -1,8 +1,8 @@
 <?php
-// $Id: panels.module,v 1.20 2008/08/06 19:01:17 sdboyer Exp $
+// $Id: panels.module,v 1.23 2008/08/22 12:39:03 sdboyer Exp $
 
-define('PANELS_BAD_ARG', 1);
-define('PANELS_USE_FALLBACK_ROUTER', 1 << 1);
+define('PANELS_ARG_IS_BAD', 1);
+define('PANELS_ARG_USE_FALLBACK', 1 << 1);
 
 /**
  * Returns the API version of Panels. This didn't exist in 1.
@@ -782,7 +782,10 @@ function panels_export_display($display, $prefix = '') {
   $output = '';
   $output .= $prefix . '$display = new panels_display()' . ";\n";
   $output .= $prefix . '$display->did = \'new\'' . ";\n";
-  $fields = array('name', 'layout', 'layout_settings', 'panel_settings');
+  // $fields = array('name', 'layout', 'layout_settings', 'panel_settings');
+  // TODO 'name' field was removed several months ago, so temporarily removing
+  // it from here whil investigations into exactly why it was removed continue
+  $fields = array('layout', 'layout_settings', 'panel_settings');
   foreach ($fields as $field) {
     $output .= $prefix . '$display->' . $field . ' = ' . panels_var_export($display->$field, $prefix) . ";\n";
   }

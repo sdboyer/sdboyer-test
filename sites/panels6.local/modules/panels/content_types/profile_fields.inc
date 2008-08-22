@@ -1,5 +1,5 @@
 <?php
-// $Id: profile_fields.inc,v 1.2 2008/07/15 23:59:36 merlinofchaos Exp $
+// $Id: profile_fields.inc,v 1.4 2008/08/19 07:04:10 sdboyer Exp $
 
 
 /**
@@ -25,7 +25,7 @@ function panels_profile_fields_panels_content_types() {
 /**
  * 'Render' callback for the 'profile fields' content type.
  */
-function panels_profile_fields_content($conf, $panel_args, $context) {
+function panels_profile_fields_content($subtype, $conf, $panel_args, $context) {
   $account = isset($context->data) ? drupal_clone($context->data) : NULL;
   $block = new stdClass();
   $block->module = 'profile fields';
@@ -46,7 +46,7 @@ function panels_profile_fields_content($conf, $panel_args, $context) {
       }
     }
 
-    if (sizeof($vars) == 0) {
+    if (count($vars) == 0) {
       // Output the given empty text
       $output = $conf['empty'];
     }
