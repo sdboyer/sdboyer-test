@@ -1,5 +1,5 @@
 <?php
-// $Id: panels_page.module,v 1.31 2008/08/19 15:13:02 sdboyer Exp $
+// $Id: panels_page.module,v 1.33 2008/08/25 04:12:28 sdboyer Exp $
 
 
 /**
@@ -76,7 +76,7 @@ function panels_page_menu() {
  * Delegates to an .inc file to reduce code load overhead.
  */
 function panels_page_menu_alter(&$callbacks) {
-  panels_page_load_include('menu');
+//  panels_page_load_include('menu');
   return _panels_page_menu_alter($callbacks);
 }
 
@@ -264,7 +264,7 @@ function panels_page_get_loader_data($pid, $args) {
   }
   // If we've determined that we're falling back, bail out.
   if ($load['fallback'] === TRUE) {
-    panels_page_prepare_fallback_render($load, $map);
+    panels_page_prepare_fallback_render($load, $map, $args);
     return $load;
   }
 
@@ -276,7 +276,7 @@ function panels_page_get_loader_data($pid, $args) {
     drupal_access_denied();
   }
   panels_page_load_include('render');
-  panels_page_prepare_panels_render($load, $panel_page);
+  panels_page_prepare_panels_render($load, $panel_page, $args);
 
   return $load;
 }
@@ -499,7 +499,7 @@ function panels_page_panels_exportables($op = 'list', $panels = NULL, $name = 'f
  */
 function panels_page_sanitize($page) {
   foreach (array('arguments', 'displays', 'contexts', 'relationships', 'switcher_options') as $id) {
-    if (!is_array($page->$id)) {
+    if (!isset($page->$id) || !is_array($page->$id)) {
       $page->$id = array();
     }
   }

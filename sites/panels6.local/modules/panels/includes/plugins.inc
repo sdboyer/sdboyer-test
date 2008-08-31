@@ -1,5 +1,5 @@
 <?php
-// $Id: plugins.inc,v 1.6 2008/08/18 23:37:24 merlinofchaos Exp $
+// $Id: plugins.inc,v 1.11 2008/08/30 10:26:27 sdboyer Exp $
 
 
 /**
@@ -757,11 +757,15 @@ function panels_get_pane_title(&$pane, $context = array(), $incoming_content = N
  */
 function panels_argument_get_context($argument, $arg, $empty = FALSE) {
   if ($function = panels_plugin_get_function('arguments', $argument['name'], 'context')) {
+    if (!isset($argument['argument_settings'])) {
+      $argument['argument_settings'] = array();
+    }
+
     $context = $function($arg, $argument['argument_settings'], $empty);
 
     if ($context) {
       $context->identifier = $argument['identifier'];
-      $context->page_title = $argument['title'];
+      $context->page_title = isset($argument['title']) ? $argument['title'] : '';
       $context->keyword    = $argument['keyword'];
       return $context;
     }
@@ -939,7 +943,7 @@ function panels_relationship_get_context($relationship, $arg) {
     $context = $function($arg, $relationship['relationship_settings']);
     if ($context) {
       $context->identifier = $relationship['identifier'];
-      $context->page_title = $relationship['title'];
+      $context->page_title = isset($relationship['title']) ? $relationship['title'] : '';
       $context->keyword    = $relationship['keyword'];
       return $context;
     }
@@ -1138,10 +1142,14 @@ function panels_context_context_id($context, $type = 'context') {
  */
 function panels_context_get_context($context, $type = 'context') {
   if ($function = panels_plugin_get_function('contexts', $context['name'], 'context')) {
+    if (!isset($context['context_settings'])) {
+      $context['context_settings'] = array();
+    }
+
     $return = $function($type == 'requiredcontext', $context['context_settings'], TRUE);
     if ($return) {
       $return->identifier = $context['identifier'];
-      $return->page_title = $context['title'];
+      $return->page_title = isset($context['title']) ? $context['title'] : '';
       $return->keyword    = $context['keyword'];
       return $return;
     }
@@ -1347,6 +1355,10 @@ function panels_load_includes($plugin_type, $hook, $file = NULL) {
 /**
  * Invocation of panels_include_directory(), part of the main panels API.
  *
+ * @ingroup MainAPI
+ * @ingroup HookInvokers
+ * @see panels_panels_include_directory()
+ *
  * This hook allows other modules to create their own panels .inc files
  * according to the same filename and directory schema utilized by Panels
  * itself, or some other arbitrary schema defined in implementations of the
@@ -1364,12 +1376,10 @@ function panels_load_includes($plugin_type, $hook, $file = NULL) {
  * namespace collisions between your module and other modules invoking the
  * panels API.
  *
- * @ingroup mainapi
- *
  * @param string $plugintype
  *   The type of Panels plugin being requested. Can be any of the following
  *   seven: 'content_types', 'contexts', 'arguments', 'layouts', 'styles',
- *   'relationships'
+ *   'relationships', 'cache', 'switchers'
  *
  * @return array $directories
  *   Returns an array of include subdirectories to call for the requested
@@ -1381,7 +1391,7 @@ function panels_get_directories($plugin_type) {
   foreach (module_implements('panels_include_directory') as $module) {
     $result = module_invoke($module, 'panels_include_directory', $plugin_type);
     if (isset($result) && is_string($result)) {
-      $directories[$module] = drupal_get_path('module', $module) .'/'. $result;
+      $directories[$module] = drupal_get_path('module', $module) . '/' . $result;
     }
   }
   return $directories;
@@ -1389,15 +1399,58 @@ function panels_get_directories($plugin_type) {
 
 /**
  * Implementation of hook_panels_include_directory().
+ *
+ * @see panels_get_include_directories()
+ *
+ * This simple implementation of hook_panels_include_directory() is sufficient
+ * to mark all seven of the Panels subdirectories corresponding to the different
+ * plugin types as plugin directories that the Panels engine will search for
+ * plugins of that type when a request for those plugins are made.
+ *
+ * It is important that separate directories be defined for each of the plugin
+ * types. While failure to separate the plugin directories should not result in
+ * an error, it will undermine the Panels engine's lazy-loading logic and
+ * negatively impact memory usage.
+ *
+ * Note also that including a conditional on the plugin type so that you only
+ * define plugins for directories that you have actually populated with plugin
+ * include files is another small contribution to performance that you can make.
+ * For example, if you define only content_type and context plugins and don't
+ * want them at the root level of your module directory, this code would work:
+ * @code
+ *  function MYMODULE_panels_include_directory($plugin_type) {
+ *    if ($plugin_type == 'content_type' || $plugin_type == 'context') {
+ *      return 'panels_inc/' . $plugin_type;
+ *    }
+ *  }
+ * @endcode
+ *
+ * @param string $plugin_type
+ *    The plugin type for which the Panels engine is currently requesting the
+ *    location of an include directory.
+ * @return string
+ *    The location of the include directory for plugin type being requested,
+ *    relative to the base directory of the module implementing this hook.
  */
 function panels_panels_include_directory($plugin_type) {
   return $plugin_type;
 }
 
 /**
- * Load plugin info for all hooks; this is handled separately from plugins
- * from files. This is cached so we don't find ourselves building this
- * repeatedly.
+ * Load plugin info for the provided hook; this is handled separately from
+ * plugins from files.
+ *
+ * IMPORTANT: The hooks invoked by this function do work, but it is _not_ the
+ * preferred method, as it is left up to the module invoking the hook to handle
+ * including separate .inc files with potentially unneeded functions - and there
+ * is no way for any entity external to the Panels engine to know if that
+ * inclusion is necessary. Consequently, hook_panels_include_directory() should
+ * be used unless some aspect of the client's implementation is incompatible
+ * with that approach.
+ *
+ * @see panels_get_include_directories()
+ *
+ * @ingroup HookInvokers
  *
  * @param $hook
  *   The hook being invoked.

@@ -1,0 +1,68 @@
+Index: panels.module
+===================================================================
+RCS file: /cvs/drupal-contrib/contributions/modules/panels/panels.module,v
+retrieving revision 1.25
+diff -u -u -p -r1.25 panels.module
+--- panels.module	23 Aug 2008 00:57:55 -0000	1.25
++++ panels.module	30 Aug 2008 17:34:29 -0000
+@@ -156,7 +156,7 @@ function panels_menu() {
+ 
+   // Non-display editor callbacks
+   $items['panels/node/autocomplete'] = array(
+-    'title' => t('Autocomplete node'),
++    'title' => 'Autocomplete node',
+     'page callback' => 'panels_node_autocomplete',
+     'file' => 'includes/callbacks.inc',
+   ) + $base;
+@@ -177,11 +177,11 @@ function panels_menu() {
+ 
+   // Provide a nice location for a panels admin panel.
+   $items['admin/panels'] = array(
+-    'title' => t('Panels'),
++    'title' => 'Panels',
+     'access arguments' => array('access administration pages'),
+     'page callback' => 'panels_admin_page',
+     'file' => 'includes/callbacks.inc',
+-    'description' => t('Administer items related to the Panels module.'),
++    'description' => 'Administer items related to the Panels module.',
+   );
+ 
+   return $items;
+Index: includes/common.inc
+===================================================================
+RCS file: /cvs/drupal-contrib/contributions/modules/panels/includes/common.inc,v
+retrieving revision 1.8
+diff -u -u -p -r1.8 common.inc
+--- includes/common.inc	18 Aug 2008 10:33:41 -0000	1.8
++++ includes/common.inc	30 Aug 2008 17:34:30 -0000
+@@ -300,7 +300,7 @@ function panels_common_settings(&$form_s
+ 
+   $form['submit'] = array(
+     '#type' => 'submit',
+-    '#value' => t('Submit'),
++    '#value' => t('Save'),
+   );
+ 
+   drupal_add_css(panels_get_path('css/panels_page.css'));
+@@ -400,16 +400,16 @@ function panels_common_set_allowed_layou
+   return $form;
+ }
+ 
+-function panels_common_set_allowed_layouts_validate($form_id, $form_values, $form) {
+-  $selected = array_filter($form_values['layouts']);
++function panels_common_set_allowed_layouts_validate($form, &$form_state) {
++  $selected = array_filter($form_state['values']['layouts']);
+   if (empty($selected)) {
+     form_set_error('layouts', 'You must choose at least one layout to allow.');
+   }
+ }
+ 
+-function panels_common_set_allowed_layouts_submit($form_id, $form_values) {
+-  list($allowed_layouts) = $form_values['variables'];
+-  foreach ($form_values['layouts'] as $layout => $setting) {
++function panels_common_set_allowed_layouts_submit($form, &$form_status) {
++  list($allowed_layouts) = $form_state['values']['variables'];
++  foreach ($form_state['values']['layouts'] as $layout => $setting) {
+     $allowed_layouts->allowed_layout_settings[$layout] = $setting === 0 ? 0 : 1;
+   }
+   method_exists($allowed_layouts, 'save') ? $allowed_layouts->save() : $allowed_layouts->api_save();
