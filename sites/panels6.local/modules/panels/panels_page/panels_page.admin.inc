@@ -1,5 +1,5 @@
 <?php
-// $Id: panels_page.admin.inc,v 1.16 2008/08/25 04:12:28 sdboyer Exp $
+// $Id: panels_page.admin.inc,v 1.18 2008/08/31 23:59:50 sdboyer Exp $
 
 
 /**
@@ -52,10 +52,10 @@ function panels_page_list_page() {
     }
     else {
       if (empty($panel_page->disabled)) {
-        $ops[] = l(t('Disable'), "admin/panels/panel-page/disable/$panel_page->name", NULL, drupal_get_destination());
+        $ops[] = l(t('Disable'), "admin/panels/panel-page/disable/$panel_page->name", array('query' => drupal_get_destination()));
       }
       else {
-        $ops[] = l(t('Enable'), "admin/panels/panel-page/enable/$panel_page->name", NULL, drupal_get_destination());
+        $ops[] = l(t('Enable'), "admin/panels/panel-page/enable/$panel_page->name", array('query' => drupal_get_destination()));
       }
     }
 
@@ -175,11 +175,11 @@ function panels_page_delete_confirm(&$form_state, $panel_page) {
 /**
  * Handle the submit button to delete a panel page.
  */
-function panels_page_delete_confirm_submit($form_id, $form) {
-  if ($form['confirm']) {
+function panels_page_delete_confirm_submit($form, &$form_state) {
+  if ($form_state['values']['confirm']) {
     panels_page_delete((object) $form);
     // TODO: Is this necessary or did we feed it the location already?
-    return 'admin/panels/panel-page';
+    $form_state['redirect'] = 'admin/panels/panel-page';
   }
 }
 
@@ -811,7 +811,7 @@ function panels_page_preview_page(&$form_state, $panel_page) {
     $context = !empty($load_objects[$id]) ? panels_argument_get_context($argument, $load_objects[$id]) : PANELS_BAD_ARG;
     if (!is_a($context, 'panels_required_context') && !is_a($context, 'panels_context')) {
       if ($context & PANELS_USE_FALLBACK_ROUTER) {
-        if ($panel_page->loader_flags & PANELS_HAS_FALLBACK_ROUTER) {
+        if ($panel_page->load_flags & PANELS_HAS_FALLBACK_ROUTER) {
           $loader_data['fallback'] = TRUE;
           break;
         }
@@ -921,7 +921,7 @@ function panels_page_admin_view_submit($form, &$form_state) {
   if (!empty($form_state['values']['additional'])) {
     $url .= "/" . $form_state['values']['additional'];
   }
-  return $url;
+  $form_state['redirect'] = $url;
 }
 
 

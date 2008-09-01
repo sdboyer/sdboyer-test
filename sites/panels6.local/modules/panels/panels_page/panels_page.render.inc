@@ -1,29 +1,39 @@
 <?php
-// $Id: panels_page.render.inc,v 1.11 2008/08/25 04:12:28 sdboyer Exp $
+// $Id: panels_page.render.inc,v 1.13 2008/09/01 00:17:28 sdboyer Exp $
 
 /**
  * @file panels_page.render.inc
  *  Functions utilized during the panels_page render process. On any given page
- *  request, this file is lazy-loaded by panels_page itself only after it's been
- *  absolutely verified that it's needed.
+ *  request, this file is lazy-loaded by panels_page itself only after it has
+ *  been absolutely verified that a panels_page render should be done.
  */
 
-function panels_page_prepare_panels_render(&$loader_data, &$panel_page, $args) {
+/**
+ * Load the $load object with all the necessary data for the current panels_page
+ * callback.
+ *
+ * @param $load
+ *   A single panels_page master loader object.
+ * @param $panel_page
+ * @param $args
+ */
+function panels_page_prepare_panels_render(&$load, &$panel_page, $args) {
   _panels_page_prepare_panels_render($panel_page);
 
-  // Store the instructions back in our load handler array.
-  $loader_data['page callback']   = 'panels_page_render_page_' . ($panel_page->form ? 'form' : 'normal');
-  $loader_data['title callback']  = 'panels_page_get_title';
-  // Pass by ref to ENSURE php4/5 consistency and keep down static cache size.
-  $loader_data['panel page']      = &$panel_page;
-  $loader_data['page arguments']  = array(&$loader_data['panel page'], $args, FALSE);
-  $loader_data['title arguments'] = array(&$loader_data['panel page']);
+  // TODO the original logic is commented out, but retained; switch back to it if anything quirky happens
+  // $load->title          = (!$panel_page->display->hide_title && $title = filter_xss_admin(panels_page_get_title($panel_page, 'page', ''))) ? $title : '';
+  $load->title          = $panel_page->display->hide_title ? '' : filter_xss_admin(panels_page_get_title($panel_page, 'page', ''));
+  $load->page_callback  = 'panels_page_render_page_' . ($panel_page->form ? 'form' : 'normal');
+  // Pass by ref to ENSURE php4/5 consistency and minimize static cache size.
+  $load->panel_page     = &$panel_page;
+  $load->page_arguments = array(&$load->panel_page, $args, FALSE);
+  return $load;
 }
 
 function _panels_page_prepare_panels_render(&$panel_page) {
   _panels_page_check_switchers($panel_page);
-  // $panel_page->context = panels_context_load_contexts($panel_page, FALSE, $panel_page->context);
-  $panel_page->context = panels_context_load_contexts($panel_page);
+  // $panel_page->context = panels_context_load_contexts($panel_page, FALSE, $panel_page->contexts);
+  // $panel_page->context = panels_context_load_contexts($panel_page);
   // If we're wrapping FAPI with with panel, this function gets the data.
   $panel_page->form = panels_context_get_form($panel_page->context);
   // Get any keywords (for title substitution in panes)
